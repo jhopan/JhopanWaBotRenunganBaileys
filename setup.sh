@@ -1,515 +1,133 @@
 #!/bin/bash
 # ============================================
-# JhopanWa Bot - Setup Wizard
-# One-command setup: Cloudflare Tunnel + Bot
+# JhopanWa Bot - Universal Setup Launcher
+# Auto-detect platform & run appropriate script
 # ============================================
-set -e
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# State file for rerun safety
-STATE_FILE=".setup-state"
-
-# Banner
 echo ""
 echo -e "${CYAN}╔═══════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║     JhopanWa Bot - Setup Wizard                   ║${NC}"
-echo -e "${CYAN}║     Baileys + Cloudflare Tunnel                   ║${NC}"
+echo -e "${CYAN}║     JhopanWa Bot - Universal Setup Launcher       ║${NC}"
+echo -e "${CYAN}║     Baileys (No Chromium) - Any Platform          ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Helper functions
-info()    { echo -e "${BLUE}ℹ️  $1${NC}"; }
-success() { echo -e "${GREEN}✅ $1${NC}"; }
-warn()    { echo -e "${YELLOW}⚠️  $1${NC}"; }
-error()   { echo -e "${RED}❌ $1${NC}"; }
-step()    { echo -e "\n${CYAN}━━━ $1 ━━━${NC}"; }
+# Ensure we're in the project directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Save state
-save_state() {
-  echo "$1=done" >> "$STATE_FILE"
+# ── Platform Detection ──
+detect_platform() {
+  # Termux (Android)
+  if [ -n "$TERMUX_VERSION" ] || [ -d "$PREFIX/share/termux" ]; then
+    echo "termux"
+    return
+  fi
+
+  # OpenWRT
+  if [ -f /etc/openwrt_release ]; then
+    echo "openwrt"
+    return
+  fi
+
+  # macOS
+  if [ "$(uname -s)" = "Darwin" ]; then
+    echo "macos"
+    return
+  fi
+
+  # Windows (Git Bash / MSYS / Cygwin)
+  if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ "$OSTYPE" == "win32" ]]; then
+    echo "windows"
+    return
+  fi
+
+  # Linux — check if GCP
+  if [ "$(uname -s)" = "Linux" ]; then
+    if curl -s -m 2 -H "Metadata-Flavor: Google" \
+       http://metadata.google.internal/computeMetadata/v1/ &>/dev/null; then
+      echo "gcp"
+      return
+    fi
+    echo "vps"
+    return
+  fi
+
+  echo "unknown"
 }
 
-# Check state
-is_done() {
-  grep -q "^$1=done$" "$STATE_FILE" 2>/dev/null
-}
+PLATFORM=$(detect_platform)
 
-# Cleanup on failure
-ROLLBACK_ACTIONS=()
-add_rollback() {
-  ROLLBACK_ACTIONS+=("$1")
-}
-
-rollback() {
-  if [ ${#ROLLBACK_ACTIONS[@]} -gt 0 ]; then
+# Display platform info
+echo -e "${GREEN}Platform detected:${NC}"
+case "$PLATFORM" in
+  gcp)
+    echo -e "   ${CYAN}Google Cloud Platform (Compute Engine)${NC}"
+    SCRIPT="setup-gcp.sh"
+    ;;
+  vps)
+    echo -e "   ${CYAN}Linux VPS / Server${NC}"
+    SCRIPT="setup-vps.sh"
+    ;;
+  termux)
+    echo -e "   ${CYAN}Termux (Android)${NC}"
+    SCRIPT="setup-termux.sh"
+    ;;
+  openwrt)
+    echo -e "   ${CYAN}OpenWRT Router${NC}"
+    SCRIPT="setup-openwrt.sh"
+    ;;
+  macos)
+    echo -e "   ${CYAN}macOS${NC}"
+    SCRIPT="setup-macos.sh"
+    ;;
+  windows)
+    echo -e "   ${CYAN}Windows (Git Bash)${NC}"
+    SCRIPT="setup.bat"
+    ;;
+  *)
+    echo -e "   ${RED}Unknown platform${NC}"
     echo ""
-    warn "Rolling back changes..."
-    for ((i=${#ROLLBACK_ACTIONS[@]}-1; i>=0; i--)); do
-      eval "${ROLLBACK_ACTIONS[$i]}" 2>/dev/null || true
-    done
-    info "Rollback complete."
-  fi
-  rm -f "$STATE_FILE"
-  exit 1
-}
-
-trap 'if [ $? -ne 0 ]; then error "Setup failed!"; rollback; fi' EXIT
-
-# ============================================
-# STEP 1: Check Prerequisites
-# ============================================
-step "Step 1/5: Checking prerequisites"
-
-# Node.js
-if command -v node &>/dev/null; then
-  NODE_VER=$(node -v)
-  NODE_MAJOR=$(echo "$NODE_VER" | grep -oP '\d+' | head -1)
-  if [ "$NODE_MAJOR" -ge 20 ]; then
-    success "Node.js $NODE_VER"
-  else
-    error "Node.js >= 20 required (found $NODE_VER)"
-    info "Install: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash - && sudo apt install -y nodejs"
-    exit 1
-  fi
-else
-  error "Node.js not found"
-  info "Install: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash - && sudo apt install -y nodejs"
-  exit 1
-fi
-
-# npm
-if command -v npm &>/dev/null; then
-  success "npm $(npm -v)"
-else
-  error "npm not found"
-  exit 1
-fi
-
-# cloudflared (optional)
-HAS_CLOUDFLARED=false
-if command -v cloudflared &>/dev/null; then
-  success "cloudflared $(cloudflared --version 2>&1 | grep -oP '[\d.]+' | head -1)"
-  HAS_CLOUDFLARED=true
-else
-  warn "cloudflared not installed (optional - needed for webhook mode)"
-fi
-
-# Git
-if command -v git &>/dev/null; then
-  success "git $(git --version | grep -oP '[\d.]+' | head -1)"
-else
-  warn "git not found (optional)"
-fi
-
-if is_done "prerequisites"; then
-  info "Prerequisites already checked (skipping)"
-fi
-save_state "prerequisites"
-
-# ============================================
-# STEP 2: Configuration
-# ============================================
-step "Step 2/5: Configuration"
-
-# Check if .env already exists
-USE_EXISTING_ENV=false
-if [ -f ".env" ]; then
-  echo ""
-  read -p "  .env already exists. Use existing config? (Y/n): " use_existing
-  if [[ "$use_existing" != "n" && "$use_existing" != "N" ]]; then
-    USE_EXISTING_ENV=true
-    success "Using existing .env"
-  fi
-fi
-
-if [ "$USE_EXISTING_ENV" = false ]; then
-  echo ""
-  echo "  📋 Bot Configuration:"
-  echo ""
-
-  # Telegram Bot Token
-  while true; do
-    read -p "  Telegram Bot Token (dari @BotFather): " TG_TOKEN
-    if [[ "$TG_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
-      break
-    fi
-    error "Format tidak valid. Contoh: 123456789:ABCdefGHI..."
-  done
-
-  # AI API Endpoint
-  read -p "  AI API Endpoint: " AI_ENDPOINT
-  AI_ENDPOINT=${AI_ENDPOINT:-"https://your-api-endpoint.com/v1"}
-
-  # AI API Key
-  read -p "  AI API Key: " AI_KEY
-  while [ -z "$AI_KEY" ]; do
-    error "AI API Key tidak boleh kosong"
-    read -p "  AI API Key: " AI_KEY
-  done
-
-  # AI Model
-  read -p "  AI Model [gemini/gemini-2.5-flash-lite]: " AI_MODEL
-  AI_MODEL=${AI_MODEL:-"gemini/gemini-2.5-flash-lite"}
-
-  # Telegram Admin ID
-  read -p "  Telegram Admin ID: " ADMIN_ID
-  while [ -z "$ADMIN_ID" ]; do
-    error "Admin ID tidak boleh kosong"
-    read -p "  Telegram Admin ID: " ADMIN_ID
-  done
-
-  # Timezone
-  read -p "  Timezone [Asia/Makassar]: " TIMEZONE
-  TIMEZONE=${TIMEZONE:-"Asia/Makassar"}
-
-  # Renungan Time
-  read -p "  Renungan Time [08:00]: " RENUNGAN_TIME
-  RENUNGAN_TIME=${RENUNGAN_TIME:-"08:00"}
-
-  # Write .env
-  cat > .env << EOF
-# ============================================
-# Generated by setup wizard on $(date)
-# ============================================
-
-TIMEZONE=${TIMEZONE}
-
-TELEGRAM_BOT_TOKEN=${TG_TOKEN}
-
-AI_API_KEY=${AI_KEY}
-AI_API_ENDPOINT=${AI_ENDPOINT}
-AI_MODEL=${AI_MODEL}
-
-ADMIN_TELEGRAM_IDS=${ADMIN_ID}
-
-RENUNGAN_GROUP_ID=
-RENUNGAN_TIME=${RENUNGAN_TIME}
-EOF
-
-  success ".env written"
-  add_rollback "rm -f .env"
-fi
-
-save_state "config"
-
-# ============================================
-# STEP 3: Cloudflare Tunnel (Optional)
-# ============================================
-step "Step 3/5: Cloudflare Tunnel Setup"
-
-SETUP_TUNNEL=false
-WEBHOOK_URL=""
-
-if is_done "tunnel"; then
-  # Tunnel already configured
-  WEBHOOK_URL=$(grep "^WEBHOOK_URL=" .env 2>/dev/null | cut -d= -f2)
-  if [ -n "$WEBHOOK_URL" ]; then
-    success "Tunnel already configured: $WEBHOOK_URL"
-    info "To reconfigure: rm .setup-state && run setup again"
-  fi
-else
-  echo ""
-  if [ "$HAS_CLOUDFLARED" = true ]; then
-    read -p "  Setup Cloudflare Tunnel? (Y/n): " setup_cf
-    if [[ "$setup_cf" != "n" && "$setup_cf" != "N" ]]; then
-      SETUP_TUNNEL=true
-    fi
-  else
-    read -p "  Install cloudflared and setup tunnel? (y/N): " install_cf
-    if [[ "$install_cf" == "y" || "$install_cf" == "Y" ]]; then
-      info "Installing cloudflared..."
-      
-      # Detect architecture
-      ARCH=$(uname -m)
-      if [ "$ARCH" = "x86_64" ]; then
-        CF_ARCH="amd64"
-      elif [ "$ARCH" = "aarch64" ]; then
-        CF_ARCH="arm64"
-      elif [ "$ARCH" = "armv7l" ]; then
-        CF_ARCH="arm"
-      else
-        error "Unsupported architecture: $ARCH"
-        exit 1
-      fi
-
-      # Install cloudflared
-      if command -v apt &>/dev/null; then
-        curl -L --output /tmp/cloudflared.deb "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}.deb"
-        sudo dpkg -i /tmp/cloudflared.deb
-        rm /tmp/cloudflared.deb
-      elif command -v yum &>/dev/null; then
-        sudo rpm -ivh "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}.rpm"
-      else
-        curl -L --output /usr/local/bin/cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}"
-        chmod +x /usr/local/bin/cloudflared
-      fi
-
-      success "cloudflared installed: $(cloudflared --version 2>&1)"
-      HAS_CLOUDFLARED=true
-      SETUP_TUNNEL=true
-      add_rollback "sudo rm -f /usr/local/bin/cloudflared /usr/bin/cloudflared"
-    fi
-  fi
-
-  if [ "$SETUP_TUNNEL" = true ]; then
-    # Check if already authorized
-    CERT_FILE=$(ls ~/.cloudflared/cert.pem 2>/dev/null || ls /etc/cloudflared/cert.pem 2>/dev/null || true)
-    if [ -n "$CERT_FILE" ]; then
-      success "Cloudflare already authorized (cert found: $CERT_FILE)"
-    else
-      echo ""
-      info "Opening browser for Cloudflare login..."
-      info "Please authorize cloudflared in your browser"
-      echo ""
-      cloudflared tunnel login
-      success "Cloudflare authorized!"
-      CERT_FILE=$(ls ~/.cloudflared/cert.pem 2>/dev/null || ls /etc/cloudflared/cert.pem 2>/dev/null || true)
-    fi
-
-    if [ -z "$CERT_FILE" ]; then
-      error "Certificate not found. Please run 'cloudflared tunnel login' manually."
-      exit 1
-    fi
-
-    # Create tunnel (or reuse existing)
-    TUNNEL_NAME="wa-renungan"
-    EXISTING=$(cloudflared tunnel list 2>/dev/null | grep -w "$TUNNEL_NAME" || true)
-    if [ -n "$EXISTING" ]; then
-      TUNNEL_ID=$(cloudflared tunnel list 2>/dev/null | grep -w "$TUNNEL_NAME" | head -1 | awk '{print $1}')
-      success "Using existing tunnel '$TUNNEL_NAME': $TUNNEL_ID"
-    else
-      info "Creating tunnel: $TUNNEL_NAME"
-      cloudflared tunnel create "$TUNNEL_NAME" 2>/dev/null || true
-      TUNNEL_ID=$(cloudflared tunnel list 2>/dev/null | grep -w "$TUNNEL_NAME" | head -1 | awk '{print $1}')
-      if [ -z "$TUNNEL_ID" ]; then
-        error "Failed to create tunnel"
-        exit 1
-      fi
-      success "Tunnel created: $TUNNEL_ID"
-      add_rollback "cloudflared tunnel delete $TUNNEL_NAME 2>/dev/null"
-    fi
-
-    # Ask for domain
+    echo -e "${YELLOW}Available scripts:${NC}"
+    echo "  bash setup-vps.sh      — Generic Linux VPS"
+    echo "  bash setup-gcp.sh      — Google Cloud Platform"
+    echo "  bash setup-termux.sh   — Termux (Android)"
+    echo "  bash setup-openwrt.sh  — OpenWRT Router"
+    echo "  bash setup-macos.sh    — macOS"
+    echo "  cmd setup.bat          — Windows"
     echo ""
-    read -p "  Domain untuk tunnel (contoh: jhopan.my.id): " DOMAIN
-    while [ -z "$DOMAIN" ]; do
-      error "Domain tidak boleh kosong"
-      read -p "  Domain untuk tunnel: " DOMAIN
-    done
-
-    # Ask for subdomain
-    read -p "  Subdomain [wa-bot]: " SUBDOMAIN
-    SUBDOMAIN=${SUBDOMAIN:-"wa-bot"}
-    FULL_HOSTNAME="${SUBDOMAIN}.${DOMAIN}"
-
-    # Route DNS (use full hostname, not just subdomain)
-    info "Routing DNS: $FULL_HOSTNAME → tunnel $TUNNEL_NAME"
-    cloudflared tunnel route dns "$TUNNEL_NAME" "$FULL_HOSTNAME" 2>/dev/null || warn "DNS route may already exist"
-    success "DNS routed: $FULL_HOSTNAME"
-
-    # Write config to SYSTEM path (/etc/cloudflared/) for service compatibility
-    SYS_CONFIG_DIR="/etc/cloudflared"
-    USER_CONFIG_DIR="$HOME/.cloudflared"
-    sudo mkdir -p "$SYS_CONFIG_DIR"
-
-    # Find credentials file
-    CRED_FILE=$(ls "${USER_CONFIG_DIR}/${TUNNEL_ID}.json" 2>/dev/null || echo "")
-    if [ -z "$CRED_FILE" ]; then
-      CRED_FILE="${USER_CONFIG_DIR}/${TUNNEL_ID}.json"
-    fi
-
-    # Copy cert and credentials to system path
-    sudo cp -f "${USER_CONFIG_DIR}/cert.pem" "${SYS_CONFIG_DIR}/" 2>/dev/null || true
-    sudo cp -f "${CRED_FILE}" "${SYS_CONFIG_DIR}/" 2>/dev/null || true
-
-    SYS_CRED_FILE="${SYS_CONFIG_DIR}/$(basename "$CRED_FILE")"
-
-    # Write config with QUIC protocol (more reliable behind NAT/firewalls)
-    sudo tee "${SYS_CONFIG_DIR}/config.yml" > /dev/null << EOF
-tunnel: ${TUNNEL_ID}
-credentials-file: ${SYS_CRED_FILE}
-protocol: quic
-
-ingress:
-  - hostname: ${FULL_HOSTNAME}
-    service: http://localhost:${WEBHOOK_PORT:-3000}
-  - service: http_status:404
-EOF
-
-    # Also write to user config for manual runs
-    cat > "${USER_CONFIG_DIR}/config.yml" << EOF
-tunnel: ${TUNNEL_ID}
-credentials-file: ${CRED_FILE}
-protocol: quic
-
-ingress:
-  - hostname: ${FULL_HOSTNAME}
-    service: http://localhost:${WEBHOOK_PORT:-3000}
-  - service: http_status:404
-EOF
-
-    success "config.yml written (system + user path, QUIC protocol)"
-    add_rollback "sudo rm -f ${SYS_CONFIG_DIR}/config.yml"
-
-    # Install as system service
-    info "Installing cloudflared as system service..."
-    if command -v systemctl &>/dev/null; then
-      # Uninstall old service first
-      sudo cloudflared service uninstall 2>/dev/null || true
-      sleep 1
-
-      # Install with explicit system config path
-      sudo cloudflared --config "${SYS_CONFIG_DIR}/config.yml" service install 2>&1 || true
-      sleep 1
-
-      # Reload, enable, start
-      sudo systemctl daemon-reload 2>/dev/null || true
-      sudo systemctl enable cloudflared 2>/dev/null || true
-      sudo systemctl restart cloudflared 2>/dev/null || true
-
-      # Wait and verify
-      sleep 3
-      if systemctl is-active --quiet cloudflared 2>/dev/null; then
-        success "cloudflared service installed & running (QUIC)"
-      else
-        # Try to get error details
-        SVC_STATUS=$(systemctl status cloudflared 2>&1 | head -5)
-        warn "Service not running. Status:"
-        echo "$SVC_STATUS" | while read -r line; do echo "    $line"; done
-        warn "Try manually: cloudflared tunnel --protocol quic run $TUNNEL_NAME"
-      fi
-      add_rollback "sudo cloudflared service uninstall 2>/dev/null"
-    else
-      warn "systemctl not found. Start tunnel manually:"
-      echo "    cloudflared tunnel --protocol quic run $TUNNEL_NAME"
-    fi
-
-    # Update .env with WEBHOOK_URL
-    WEBHOOK_URL="https://${FULL_HOSTNAME}"
-
-    if grep -q "^WEBHOOK_URL=" .env 2>/dev/null; then
-      sed -i "s|^WEBHOOK_URL=.*|WEBHOOK_URL=${WEBHOOK_URL}|" .env
-    else
-      echo "" >> .env
-      echo "# Webhook (Cloudflare Tunnel)" >> .env
-      echo "WEBHOOK_URL=${WEBHOOK_URL}" >> .env
-      echo "WEBHOOK_PORT=3000" >> .env
-    fi
-
-    success "Webhook URL: $WEBHOOK_URL"
-    save_state "tunnel"
-  else
-    info "Skipping tunnel setup (will use polling mode)"
-    
-    # Remove WEBHOOK_URL from .env if exists
-    if grep -q "^WEBHOOK_URL=" .env 2>/dev/null; then
-      sed -i '/^WEBHOOK_URL=/d' .env
-      sed -i '/^WEBHOOK_PORT=/d' .env
-    fi
-    
-    save_state "tunnel"
-  fi
-fi
-
-# ============================================
-# STEP 4: Bot Setup
-# ============================================
-step "Step 4/5: Bot Setup"
-
-# npm install
-if [ -d "node_modules" ] && [ -f "package-lock.json" ]; then
-  info "node_modules exists. Checking integrity..."
-  if npm ls --depth=0 &>/dev/null; then
-    success "Dependencies already installed"
-  else
-    info "Reinstalling dependencies..."
-    npm install --production
-    success "Dependencies installed"
-  fi
-else
-  info "Installing dependencies..."
-  npm install --production
-  success "Dependencies installed ($(ls node_modules | wc -l) packages)"
-  add_rollback "rm -rf node_modules package-lock.json"
-fi
-
-# Create logs directory
-mkdir -p logs
-success "Logs directory ready"
-
-# Test AI connection
-info "Testing AI connection..."
-AI_TEST=$(node -e "
-require('dotenv').config({override: true});
-const ai = require('./src/services/aiService');
-ai.testAIConnection().then(r => {
-  if (r.success) {
-    console.log('OK:' + r.provider + ':' + r.model);
-  } else {
-    console.log('FAIL:' + (r.error || 'unknown'));
-  }
-}).catch(e => console.log('FAIL:' + e.message));
-" 2>/dev/null)
-
-if [[ "$AI_TEST" == OK:* ]]; then
-  AI_INFO=$(echo "$AI_TEST" | cut -d: -f2-)
-  success "AI connection: $AI_INFO"
-else
-  AI_ERR=$(echo "$AI_TEST" | cut -d: -f2-)
-  warn "AI connection failed: $AI_ERR"
-  warn "Bot will still start, but renungan generation won't work"
-fi
-
-save_state "bot"
-
-# ============================================
-# STEP 5: Done!
-# ============================================
-step "Step 5/5: Setup Complete!"
-
-# Determine mode
-if [ -n "$WEBHOOK_URL" ]; then
-  MODE="WEBHOOK (hemat ~70% bandwidth)"
-else
-  MODE="POLLING (~750MB/month)"
-fi
-
-# Get telegram bot username
-TG_BOT_NAME=""
-TG_TOKEN_VAL=$(grep "^TELEGRAM_BOT_TOKEN=" .env | cut -d= -f2)
-if [ -n "$TG_TOKEN_VAL" ]; then
-  TG_BOT_NAME=$(curl -s "https://api.telegram.org/bot${TG_TOKEN_VAL}/getMe" 2>/dev/null | grep -oP '"username":"[^"]*"' | cut -d'"' -f4)
-fi
+    read -p "Pilih script (vps/gcp/termux/openwrt/macos): " choice
+    case "$choice" in
+      vps) SCRIPT="setup-vps.sh" ;;
+      gcp) SCRIPT="setup-gcp.sh" ;;
+      termux) SCRIPT="setup-termux.sh" ;;
+      openwrt) SCRIPT="setup-openwrt.sh" ;;
+      macos) SCRIPT="setup-macos.sh" ;;
+      *) echo -e "${RED}Pilihan tidak valid${NC}"; exit 1 ;;
+    esac
+    ;;
+esac
 
 echo ""
-echo -e "${GREEN}╔═══════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║  ✅ Setup Complete!                               ║${NC}"
-echo -e "${GREEN}╠═══════════════════════════════════════════════════╣${NC}"
-if [ -n "$TG_BOT_NAME" ]; then
-echo -e "${GREEN}║  Telegram: @${TG_BOT_NAME}${NC}"
+
+# Check if script exists
+if [ ! -f "$SCRIPT_DIR/$SCRIPT" ]; then
+  echo -e "${RED}Script not found: $SCRIPT${NC}"
+  echo -e "${YELLOW}Pastikan semua file setup ada di directory yang sama.${NC}"
+  exit 1
 fi
-if [ -n "$WEBHOOK_URL" ]; then
-echo -e "${GREEN}║  Webhook:  ${WEBHOOK_URL}${NC}"
-fi
-echo -e "${GREEN}║  AI Model: ${AI_MODEL:-gemini/gemini-2.5-flash-lite}${NC}"
-echo -e "${GREEN}║  Mode:     ${MODE}${NC}"
-echo -e "${GREEN}╠═══════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║                                                   ║${NC}"
-echo -e "${GREEN}║  Jalankan:                                        ║${NC}"
-echo -e "${GREEN}║    npm start                                      ║${NC}"
-echo -e "${GREEN}║    atau: pm2 start ecosystem.config.js            ║${NC}"
-echo -e "${GREEN}║                                                   ║${NC}"
-echo -e "${GREEN}║  Reset setup: rm .setup-state && bash setup.sh    ║${NC}"
-echo -e "${GREEN}║                                                   ║${NC}"
-echo -e "${GREEN}╚═══════════════════════════════════════════════════╝${NC}"
+
+# Run the appropriate script
+echo -e "${GREEN}Menjalankan: $SCRIPT${NC}"
 echo ""
 
-# Cleanup state file on success
-rm -f "$STATE_FILE"
+if [ "$PLATFORM" = "windows" ]; then
+  cmd.exe /c "$SCRIPT_DIR\\$SCRIPT"
+else
+  bash "$SCRIPT_DIR/$SCRIPT"
+fi

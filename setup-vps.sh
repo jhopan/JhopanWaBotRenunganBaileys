@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================
-# JhopanWa Bot - Setup GCP (Google Cloud Platform)
-# Auto-detect GCP, auto-setup zram for e2-micro
+# JhopanWa Bot - Setup VPS (Generic Linux)
+# Supports: Debian, Ubuntu, CentOS, Fedora, Alpine, Arch
 # ============================================
 set -e
 
@@ -16,8 +16,8 @@ STATE_FILE=".setup-state"
 
 echo ""
 echo -e "${CYAN}╔═══════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║     JhopanWa Bot - GCP Setup Wizard              ║${NC}"
-echo -e "${CYAN}║     Baileys + Cloudflare Tunnel + zram            ║${NC}"
+echo -e "${CYAN}║     JhopanWa Bot - VPS Setup Wizard              ║${NC}"
+echo -e "${CYAN}║     Baileys + Cloudflare Tunnel                   ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -39,71 +39,118 @@ rollback() {
       eval "${ROLLBACK_ACTIONS[$i]}" 2>/dev/null || true
     done
   fi
-  rm -f "$STATE_FILE"
-  exit 1
+  rm -f "$STATE_FILE"; exit 1
 }
 trap 'if [ $? -ne 0 ]; then error "Setup failed!"; rollback; fi' EXIT
 
 # Detect sudo
 SUDO=""
-if [ "$(id -u)" -ne 0 ] && command -v sudo &>/dev/null; then
-  SUDO="sudo"
+if [ "$(id -u)" -ne 0 ] && command -v sudo &>/dev/null; then SUDO="sudo"; fi
+
+# Detect distro & package manager
+DISTRO="unknown"
+PKG_MGR="unknown"
+INSTALL_CMD=""
+
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  DISTRO="$ID"
 fi
 
-# GCP metadata
-GCP_ZONE=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/zone 2>/dev/null | grep -oE '[^/]+$' || echo "unknown")
-GCP_MACHINE=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/machine-type 2>/dev/null | grep -oE '[^/]+$' || echo "unknown")
-TOTAL_RAM=$(free -m | awk '/^Mem:/{print $2}')
+if command -v apt &>/dev/null; then
+  PKG_MGR="apt"
+  INSTALL_CMD="$SUDO apt install -y"
+elif command -v dnf &>/dev/null; then
+  PKG_MGR="dnf"
+  INSTALL_CMD="$SUDO dnf install -y"
+elif command -v yum &>/dev/null; then
+  PKG_MGR="yum"
+  INSTALL_CMD="$SUDO yum install -y"
+elif command -v apk &>/dev/null; then
+  PKG_MGR="apk"
+  INSTALL_CMD="$SUDO apk add"
+elif command -v pacman &>/dev/null; then
+  PKG_MGR="pacman"
+  INSTALL_CMD="$SUDO pacman -S --noconfirm"
+else
+  error "No supported package manager found"
+  exit 1
+fi
 
-echo -e "  ${CYAN}Zone:${NC}    $GCP_ZONE"
-echo -e "  ${CYAN}Machine:${NC} $GCP_MACHINE"
+TOTAL_RAM=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
+
+echo -e "  ${CYAN}Distro:${NC}  $DISTRO"
+echo -e "  ${CYAN}PkgMgr:${NC}  $PKG_MGR"
 echo -e "  ${CYAN}RAM:${NC}     ${TOTAL_RAM} MB"
+echo -e "  ${CYAN}Kernel:${NC}  $(uname -r)"
 echo ""
 
 # ── Step 1: Prerequisites ──
-step "Step 1/6: Prerequisites"
+step "Step 1/5: Prerequisites"
 
+# Node.js
 if command -v node &>/dev/null; then
   NODE_VER=$(node -v)
   NODE_MAJOR=$(echo "$NODE_VER" | grep -oE '[0-9]+' | head -1)
   if [ "$NODE_MAJOR" -ge 20 ]; then
     success "Node.js $NODE_VER"
   else
+    error "Node.js >= 20 required (found $NODE_VER)"
     info "Installing Node.js 20..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO -E bash -
-    $SUDO apt install -y nodejs
+    case "$PKG_MGR" in
+      apt)
+        curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO -E bash -
+        $SUDO apt install -y nodejs ;;
+      dnf|yum)
+        curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO bash -
+        $INSTALL_CMD nodejs ;;
+      apk)
+        $INSTALL_CMD nodejs npm ;;
+      pacman)
+        $INSTALL_CMD nodejs npm ;;
+    esac
   fi
 else
   info "Installing Node.js 20..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO -E bash -
-  $SUDO apt install -y nodejs
-  success "Node.js $(node -v) installed"
+  case "$PKG_MGR" in
+    apt)
+      curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO -E bash -
+      $SUDO apt install -y nodejs ;;
+    dnf|yum)
+      curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO bash -
+      $INSTALL_CMD nodejs ;;
+    apk)
+      $INSTALL_CMD nodejs npm ;;
+    pacman)
+      $INSTALL_CMD nodejs npm ;;
+  esac
+  success "Node.js $(node -v)"
 fi
 
 command -v npm &>/dev/null || { error "npm not found"; exit 1; }
 success "npm $(npm -v)"
 
+# Git
 if command -v git &>/dev/null; then
   success "git available"
 else
-  info "Installing git..."
-  $SUDO apt update && $SUDO apt install -y git
+  $INSTALL_CMD git
   success "git installed"
 fi
+
+# curl
+command -v curl &>/dev/null || $INSTALL_CMD curl
 
 save_state "prerequisites"
 
 # ── Step 2: Configuration ──
-step "Step 2/6: Configuration"
+step "Step 2/5: Configuration"
 
 USE_EXISTING_ENV=false
 if [ -f ".env" ]; then
   echo ""
-  read -p "  .env already exists. Use existing? (Y/n): " use_existing
-  if [[ "$use_existing" != "n" && "$use_existing" != "N" ]]; then
-    USE_EXISTING_ENV=true
-    success "Using existing .env"
-  fi
+  read -p "  .env exists. Use existing? (Y/n): " use_existing
+  [[ "$use_existing" != "n" && "$use_existing" != "N" ]] && USE_EXISTING_ENV=true && success "Using existing .env"
 fi
 
 if [ "$USE_EXISTING_ENV" = false ]; then
@@ -111,41 +158,34 @@ if [ "$USE_EXISTING_ENV" = false ]; then
   echo "  Bot Configuration:"
   echo ""
   while true; do
-    read -p "  Telegram Bot Token (dari @BotFather): " TG_TOKEN
-    if [[ "$TG_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then break; fi
-    error "Format tidak valid"
+    read -p "  Telegram Bot Token (@BotFather): " TG_TOKEN
+    [[ "$TG_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]] && break
+    error "Format invalid"
   done
   read -p "  AI API Endpoint: " AI_ENDPOINT
   AI_ENDPOINT=${AI_ENDPOINT:-"https://your-api-endpoint.com/v1"}
   read -p "  AI API Key: " AI_KEY
-  while [ -z "$AI_KEY" ]; do error "Tidak boleh kosong"; read -p "  AI API Key: " AI_KEY; done
+  while [ -z "$AI_KEY" ]; do error "Required"; read -p "  AI API Key: " AI_KEY; done
   read -p "  AI Model [gemini/gemini-2.5-flash-lite]: " AI_MODEL
   AI_MODEL=${AI_MODEL:-"gemini/gemini-2.5-flash-lite"}
   read -p "  Telegram Admin ID: " ADMIN_ID
-  while [ -z "$ADMIN_ID" ]; do error "Tidak boleh kosong"; read -p "  Telegram Admin ID: " ADMIN_ID; done
+  while [ -z "$ADMIN_ID" ]; do error "Required"; read -p "  Telegram Admin ID: " ADMIN_ID; done
   read -p "  Timezone [Asia/Makassar]: " TIMEZONE
   TIMEZONE=${TIMEZONE:-"Asia/Makassar"}
   read -p "  Renungan Time [08:00]: " RENUNGAN_TIME
   RENUNGAN_TIME=${RENUNGAN_TIME:-"08:00"}
 
   cat > .env << ENVEOF
-# Generated by setup wizard on $(date)
+# Generated on $(date)
 TIMEZONE=${TIMEZONE}
-TELEGRAM_BOT_TOKEN=${TG_TOKEN}
-AI_API_KEY=${AI_KEY}
-AI_API_ENDPOINT=${AI_ENDPOINT}
-AI_MODEL=${AI_MODEL}
-ADMIN_TELEGRAM_IDS=${ADMIN_ID}
-RENUNGAN_GROUP_ID=
-RENUNGAN_TIME=${RENUNGAN_TIME}
-ENVEOF
+TELEGRAM_BOT_TOKEN=${TG_T...OF
   success ".env written"
   add_rollback "rm -f .env"
 fi
 save_state "config"
 
 # ── Step 3: Cloudflare Tunnel ──
-step "Step 3/6: Cloudflare Tunnel Setup"
+step "Step 3/5: Cloudflare Tunnel Setup"
 
 SETUP_TUNNEL=false
 WEBHOOK_URL=""
@@ -175,8 +215,16 @@ else
         armv7l) CF_ARCH="arm" ;;
         *) error "Unsupported: $ARCH"; exit 1 ;;
       esac
-      curl -L --output /tmp/cloudflared.deb "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}.deb"
-      $SUDO dpkg -i /tmp/cloudflared.deb && rm -f /tmp/cloudflared.deb
+      case "$PKG_MGR" in
+        apt)
+          curl -L --output /tmp/cloudflared.deb "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}.deb"
+          $SUDO dpkg -i /tmp/cloudflared.deb && rm -f /tmp/cloudflared.deb ;;
+        dnf|yum)
+          $SUDO rpm -ivh "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}.rpm" ;;
+        *)
+          curl -L --output /usr/local/bin/cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}"
+          chmod +x /usr/local/bin/cloudflared ;;
+      esac
       success "cloudflared installed"
       SETUP_TUNNEL=true
     fi
@@ -187,7 +235,6 @@ else
     if [ -n "$CERT_FILE" ]; then
       success "Cloudflare authorized"
     else
-      info "Cloudflare login..."
       cloudflared tunnel login
       CERT_FILE=$(ls ~/.cloudflared/cert.pem 2>/dev/null || true)
     fi
@@ -201,18 +248,18 @@ else
     else
       cloudflared tunnel create "$TUNNEL_NAME" 2>/dev/null || true
       TUNNEL_ID=$(cloudflared tunnel list 2>/dev/null | grep -w "$TUNNEL_NAME" | head -1 | awk '{print $1}')
-      [ -z "$TUNNEL_ID" ] && { error "Failed to create tunnel"; exit 1; }
-      success "Tunnel created: $TUNNEL_ID"
+      [ -z "$TUNNEL_ID" ] && { error "Tunnel creation failed"; exit 1; }
+      success "Tunnel: $TUNNEL_ID"
     fi
 
     echo ""
-    read -p "  Domain (contoh: jhopan.my.id): " DOMAIN
+    read -p "  Domain: " DOMAIN
     while [ -z "$DOMAIN" ]; do read -p "  Domain: " DOMAIN; done
     read -p "  Subdomain [wa-bot]: " SUBDOMAIN
     SUBDOMAIN=${SUBDOMAIN:-"wa-bot"}
     FULL_HOSTNAME="${SUBDOMAIN}.${DOMAIN}"
 
-    cloudflared tunnel route dns "$TUNNEL_NAME" "$FULL_HOSTNAME" 2>/dev/null || warn "DNS route may exist"
+    cloudflared tunnel route dns "$TUNNEL_NAME" "$FULL_HOSTNAME" 2>/dev/null || warn "DNS may exist"
 
     SYS_DIR="/etc/cloudflared"
     USER_DIR="$HOME/.cloudflared"
@@ -230,7 +277,6 @@ ingress:
     service: http://localhost:3000
   - service: http_status:404
 CFGEOF
-
     cat > "${USER_DIR}/config.yml" << CFGEOF
 tunnel: ${TUNNEL_ID}
 credentials-file: ${CRED_FILE}
@@ -240,79 +286,69 @@ ingress:
     service: http://localhost:3000
   - service: http_status:404
 CFGEOF
+    success "config.yml (QUIC)"
 
-    success "config.yml written (QUIC)"
-
-    $SUDO cloudflared service uninstall 2>/dev/null || true
-    sleep 1
-    $SUDO cloudflared --config "${SYS_DIR}/config.yml" service install 2>&1 || true
-    $SUDO systemctl daemon-reload 2>/dev/null || true
-    $SUDO systemctl enable cloudflared 2>/dev/null || true
-    $SUDO systemctl restart cloudflared 2>/dev/null || true
-    sleep 3
-
-    if systemctl is-active --quiet cloudflared 2>/dev/null; then
-      success "cloudflared running (QUIC)"
+    if command -v systemctl &>/dev/null; then
+      $SUDO cloudflared service uninstall 2>/dev/null || true
+      $SUDO cloudflared --config "${SYS_DIR}/config.yml" service install 2>&1 || true
+      $SUDO systemctl daemon-reload 2>/dev/null || true
+      $SUDO systemctl enable cloudflared 2>/dev/null || true
+      $SUDO systemctl restart cloudflared 2>/dev/null || true
+      sleep 3
+      systemctl is-active --quiet cloudflared 2>/dev/null && success "Service running" || warn "Manual: cloudflared tunnel --protocol quic run $TUNNEL_NAME"
     else
-      warn "Service not running. Manual: cloudflared tunnel --protocol quic run $TUNNEL_NAME"
+      warn "No systemd. Run manually: cloudflared tunnel --protocol quic run $TUNNEL_NAME"
     fi
 
     WEBHOOK_URL="https://${FULL_HOSTNAME}"
     if grep -q "^WEBHOOK_URL=" .env 2>/dev/null; then
       sed -i "s|^WEBHOOK_URL=.*|WEBHOOK_URL=${WEBHOOK_URL}|" .env
     else
-      echo "" >> .env
-      echo "WEBHOOK_URL=${WEBHOOK_URL}" >> .env
-      echo "WEBHOOK_PORT=3000" >> .env
+      echo "" >> .env; echo "WEBHOOK_URL=${WEBHOOK_URL}" >> .env; echo "WEBHOOK_PORT=3000" >> .env
     fi
     success "Webhook: $WEBHOOK_URL"
     save_state "tunnel"
   else
-    info "Polling mode (no tunnel)"
+    info "Polling mode"
     grep -q "^WEBHOOK_URL=" .env 2>/dev/null && { sed -i '/^WEBHOOK_URL=/d' .env; sed -i '/^WEBHOOK_PORT=/d' .env; }
     save_state "tunnel"
   fi
 fi
 
-# ── Step 4: zram ──
-step "Step 4/6: Memory Optimization (zram)"
+# ── Step 4: zram (optional) ──
+step "Step 4/5: Memory Optimization"
 
 if cat /proc/swaps 2>/dev/null | grep -q "zram"; then
-  success "zram already active: $(cat /proc/swaps | grep zram | awk '{print $3}') KB"
-else
-  if [ "$TOTAL_RAM" -le 1024 ]; then
-    info "Low RAM (${TOTAL_RAM}MB) - auto-installing zram 512MB"
-    $SUDO apt install -y zram-tools 2>/dev/null || true
-    echo "ALGO=lz4" | $SUDO tee /etc/default/zramswap > /dev/null
-    echo "SIZE=512" | $SUDO tee -a /etc/default/zramswap > /dev/null
-    echo "PRIORITY=100" | $SUDO tee -a /etc/default/zramswap > /dev/null
-    $SUDO modprobe zram num_devices=1 2>/dev/null || true
-    $SUDO systemctl restart zramswap 2>/dev/null || true
-    sleep 2
-    if cat /proc/swaps 2>/dev/null | grep -q "zram"; then
-      success "zram: $(cat /proc/swaps | grep zram | awk '{print $3}') KB"
-    else
-      warn "zram setup failed (not critical)"
-    fi
-  elif [ "$TOTAL_RAM" -le 2048 ]; then
-    read -p "  RAM ${TOTAL_RAM}MB. Setup zram? (Y/n): " sz
-    if [[ "$sz" != "n" && "$sz" != "N" ]]; then
-      $SUDO apt install -y zram-tools 2>/dev/null || true
-      echo "ALGO=lz4" | $SUDO tee /etc/default/zramswap > /dev/null
-      echo "SIZE=512" | $SUDO tee -a /etc/default/zramswap > /dev/null
-      echo "PRIORITY=100" | $SUDO tee -a /etc/default/zramswap > /dev/null
-      $SUDO modprobe zram num_devices=1 2>/dev/null || true
-      $SUDO systemctl restart zramswap 2>/dev/null || true
-      success "zram setup"
-    fi
-  else
-    info "RAM ${TOTAL_RAM}MB - zram not needed"
+  success "zram active: $(cat /proc/swaps | grep zram | awk '{print $3}') KB"
+elif [ "$TOTAL_RAM" -le 2048 ] && [ "$TOTAL_RAM" -gt 0 ]; then
+  echo ""
+  read -p "  RAM ${TOTAL_RAM}MB. Setup zram 512MB? (y/N): " sz
+  if [[ "$sz" == "y" || "$sz" == "Y" ]]; then
+    case "$PKG_MGR" in
+      apt)
+        $SUDO apt install -y zram-tools
+        echo "ALGO=lz4" | $SUDO tee /etc/default/zramswap > /dev/null
+        echo "SIZE=512" | $SUDO tee -a /etc/default/zramswap > /dev/null
+        echo "PRIORITY=100" | $SUDO tee -a /etc/default/zramswap > /dev/null
+        $SUDO systemctl restart zramswap 2>/dev/null || true ;;
+      dnf|yum)
+        $INSTALL_CMD zram-generator
+        $SUDO mkdir -p /etc/systemd/zram-generator.conf.d
+        echo "[zram0]" | $SUDO tee /etc/systemd/zram-generator.conf.d/zram.conf > /dev/null
+        echo "zram-size = 512" | $SUDO tee -a /etc/systemd/zram-generator.conf.d/zram.conf > /dev/null
+        echo "compression-algorithm = lz4" | $SUDO tee -a /etc/systemd/zram-generator.conf.d/zram.conf > /dev/null
+        $SUDO systemctl restart systemd-zram-setup@zram0 2>/dev/null || true ;;
+      *)
+        warn "Auto zram not supported for $PKG_MGR. Setup manually." ;;
+    esac
+    cat /proc/swaps 2>/dev/null | grep -q "zram" && success "zram active" || warn "zram setup may need reboot"
   fi
+else
+  info "RAM ${TOTAL_RAM}MB - zram not needed"
 fi
-save_state "zram"
 
-# ── Step 5: Bot ──
-step "Step 5/6: Bot Setup"
+# ── Step 5: Bot + PM2 ──
+step "Step 5/5: Bot Setup & Process Manager"
 
 if [ -d "node_modules" ] && [ -f "package-lock.json" ]; then
   npm ls --depth=0 &>/dev/null && success "Dependencies OK" || { npm install --production; success "Reinstalled"; }
@@ -323,7 +359,6 @@ else
 fi
 
 mkdir -p logs
-success "Logs ready"
 
 info "Testing AI..."
 AI_TEST=$(node -e "
@@ -334,42 +369,27 @@ ai.testAIConnection().then(r => {
   else console.log('FAIL:' + (r.error || 'unknown'));
 }).catch(e => console.log('FAIL:' + e.message));
 " 2>/dev/null)
+[[ "$AI_TEST" == OK:* ]] && success "AI: $(echo "$AI_TEST" | cut -d: -f2-)" || warn "AI: $(echo "$AI_TEST" | cut -d: -f2-)"
 
-if [[ "$AI_TEST" == OK:* ]]; then
-  success "AI: $(echo "$AI_TEST" | cut -d: -f2-)"
-else
-  warn "AI: $(echo "$AI_TEST" | cut -d: -f2-) (bot still starts)"
-fi
-save_state "bot"
-
-# ── Step 6: PM2 ──
-step "Step 6/6: Process Manager"
-
-command -v pm2 &>/dev/null || { info "Installing PM2..."; $SUDO npm install -g pm2; success "PM2 installed"; }
-
+command -v pm2 &>/dev/null || { $SUDO npm install -g pm2; success "PM2 installed"; }
 PM2_CMD=$(pm2 startup 2>&1 | grep "sudo env" || true)
-[ -n "$PM2_CMD" ] && { info "PM2 auto-start..."; eval "$PM2_CMD" 2>/dev/null || true; }
-
+[ -n "$PM2_CMD" ] && eval "$PM2_CMD" 2>/dev/null || true
 pm2 delete renungan-bot 2>/dev/null || true
 pm2 start ecosystem.config.js
 pm2 save
 sleep 2
-
 pm2 pid renungan-bot &>/dev/null && success "Bot running!" || warn "Check: pm2 logs"
-save_state "pm2"
 
 # ── Done ──
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║  Setup Complete! (GCP)                            ║${NC}"
+echo -e "${GREEN}║  Setup Complete! (VPS)                            ║${NC}"
 echo -e "${GREEN}╠═══════════════════════════════════════════════════╣${NC}"
 TG_TOKEN_VAL=*** "^TELEGRAM_BOT_TOKEN=*** .env | cut -d= -f2)
 TG_BOT_NAME=$(curl -s "https://api.telegram.org/bot${TG_TOKEN_VAL}/getMe" 2>/dev/null | grep -oE '"username":"[^"]*"' | cut -d'"' -f4 || true)
 [ -n "$TG_BOT_NAME" ] && echo -e "${GREEN}║  Telegram: @${TG_BOT_NAME}${NC}"
 [ -n "$WEBHOOK_URL" ] && echo -e "${GREEN}║  Webhook:  ${WEBHOOK_URL}${NC}"
-echo -e "${GREEN}║  GCP: ${GCP_MACHINE} (${TOTAL_RAM}MB)${NC}"
-[ -z "$WEBHOOK_URL" ] && echo -e "${GREEN}║  Mode: POLLING${NC}" || echo -e "${GREEN}║  Mode: WEBHOOK${NC}"
+echo -e "${GREEN}║  Distro: ${DISTRO} | PkgMgr: ${PKG_MGR}${NC}"
 echo -e "${GREEN}╠═══════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║  pm2 status | pm2 logs | pm2 restart all          ║${NC}"
-echo -e "${GREEN}║  free -h | cat /proc/swaps                        ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════╝${NC}"
