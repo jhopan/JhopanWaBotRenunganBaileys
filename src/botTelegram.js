@@ -32,9 +32,11 @@ moment.tz.setDefault(process.env.TIMEZONE || "Asia/Makassar");
 // ============================================
 // BOT MODE: WEBHOOK vs POLLING
 // ============================================
-const WEBHOOK_URL = process.env.WEBHOOK_URL || null;
-const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || "3000");
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || null;
+const WEBHOOK_URL = process.env.WEBHOOK_URL || RENDER_URL || null;
+const WEBHOOK_PORT = parseInt(process.env.PORT || process.env.WEBHOOK_PORT || "3000");
 const USE_WEBHOOK = !!WEBHOOK_URL;
+const IS_RENDER = !!process.env.RENDER;
 
 // Inisialisasi bot - NO polling jika pakai webhook
 let bot;
@@ -1522,12 +1524,52 @@ function startTelegramBot() {
     // WEBHOOK MODE - HEMAT BANDWIDTH
     // ============================================
     setupWebhook();
+  } else if (IS_RENDER) {
+    // ============================================
+    // RENDER POLLING - Health server + Telegram polling
+    // ============================================
+    setupHealthServer();
+    setupPolling();
   } else {
     // ============================================
     // POLLING MODE - Development/Fallback
     // ============================================
     setupPolling();
   }
+}
+
+/**
+ * Setup Health Server only (for Render polling mode)
+ * Express server for health check, Telegram uses polling
+ */
+function setupHealthServer() {
+  expressApp = express();
+  expressApp.use(express.json());
+
+  // Health check endpoint (Render needs this to stay alive)
+  expressApp.get("/health", (req, res) => {
+    res.json({
+      status: "ok",
+      mode: "polling",
+      platform: "render",
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // Root endpoint
+  expressApp.get("/", (req, res) => {
+    res.json({
+      name: "JhopanWa Bot Renungan",
+      mode: "polling",
+      platform: "render",
+      status: "running",
+    });
+  });
+
+  expressApp.listen(WEBHOOK_PORT, () => {
+    console.log(`🏥 Health server listening on port ${WEBHOOK_PORT} (Render mode)`);
+  });
 }
 
 /**

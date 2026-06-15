@@ -1,0 +1,46 @@
+# ============================================
+# JhopanWa Bot - Render Blueprint
+# Deploy to Render with one click
+# ============================================
+# Usage:
+#   1. Push this file to your GitHub repo
+#   2. Go to https://render.com → New → Blueprint
+#   3. Connect your GitHub repo
+#   4. Render will auto-detect this file
+# ============================================
+
+services:
+  - type: web
+    name: jhopanwa-bot-renungan
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: bash setup-render.sh
+    startCommand: node src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TIMEZONE
+        value: Asia/Makassar
+      - key: RENUNGAN_TIME
+        value: "08:00"
+      # ── Required (set these in Render Dashboard) ──
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        sync: false
+      # ── AI Provider (choose one) ──
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_API_ENDPOINT
+        sync: false
+      - key: AI_MODEL
+        value: gemini/gemini-2.5-flash-lite
+      # ── Optional ──
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: RENUNGAN_GROUP_ID
+        sync: false

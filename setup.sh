@@ -47,6 +47,12 @@ detect_platform() {
     return
   fi
 
+  # Render.com
+  if [ -n "$RENDER" ] || [ -n "$RENDER_SERVICE_ID" ]; then
+    echo "render"
+    return
+  fi
+
   # Linux — check if GCP
   if [ "$(uname -s)" = "Linux" ]; then
     if curl -s -m 2 -H "Metadata-Flavor: Google" \
@@ -90,6 +96,10 @@ case "$PLATFORM" in
     echo -e "   ${CYAN}Windows (Git Bash)${NC}"
     SCRIPT="setup.bat"
     ;;
+  render)
+    echo -e "   ${CYAN}Render.com (Cloud PaaS)${NC}"
+    SCRIPT="setup-render.sh"
+    ;;
   *)
     echo -e "   ${RED}Unknown platform${NC}"
     echo ""
@@ -99,15 +109,17 @@ case "$PLATFORM" in
     echo "  bash setup-termux.sh   — Termux (Android)"
     echo "  bash setup-openwrt.sh  — OpenWRT Router"
     echo "  bash setup-macos.sh    — macOS"
+    echo "  bash setup-render.sh   — Render.com"
     echo "  cmd setup.bat          — Windows"
     echo ""
-    read -p "Pilih script (vps/gcp/termux/openwrt/macos): " choice
+    read -p "Pilih script (vps/gcp/termux/openwrt/macos/render): " choice
     case "$choice" in
       vps) SCRIPT="setup-vps.sh" ;;
       gcp) SCRIPT="setup-gcp.sh" ;;
       termux) SCRIPT="setup-termux.sh" ;;
       openwrt) SCRIPT="setup-openwrt.sh" ;;
       macos) SCRIPT="setup-macos.sh" ;;
+      render) SCRIPT="setup-render.sh" ;;
       *) echo -e "${RED}Pilihan tidak valid${NC}"; exit 1 ;;
     esac
     ;;

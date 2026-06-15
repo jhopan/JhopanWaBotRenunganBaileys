@@ -8,9 +8,12 @@
     "start": "node src/index.js",
     "start:gc": "node --expose-gc --max-old-space-size=256 src/index.js",
     "start:prod": "node --expose-gc --max-old-space-size=256 --optimize-for-size src/index.js",
+    "start:render": "node --max-old-space-size=256 src/index.js",
     "dev": "node --watch src/index.js",
     "tunnel": "cloudflared tunnel --url http://localhost:3000",
-    "setup": "node -e \"const os=require('os');if(os.platform()==='win32'){require('child_process').execSync('setup.bat',{stdio:'inherit',shell:'cmd.exe'})}else{require('child_process').execSync('bash setup.sh',{stdio:'inherit'})}\""
+    "setup": "node -e \"const os=require('os');if(os.platform()==='win32'){require('child_process').execSync('setup.bat',{stdio:'inherit',shell:'cmd.exe'})}else{require('child_process').execSync('bash setup.sh',{stdio:'inherit'})}\"",
+    "setup:render": "bash setup-render.sh",
+    "build:render": "bash setup-render.sh"
   },
   "keywords": [
     "whatsapp",
