@@ -3,6 +3,7 @@
  * Migrasi dari whatsapp-web.js ke @whiskeysockets/baileys
  * Jauh lebih ringan: ~50-100MB RAM vs ~300-500MB
  *
+ * Storage: MongoDB (primary) → Local file (fallback)
  * Interface publik TETAP SAMA agar file lain tidak perlu diubah.
  */
 
@@ -18,6 +19,8 @@ const { Boom } = require("@hapi/boom");
 const pino = require("pino");
 const qrcode = require("qrcode");
 const qrcodeTerminal = require("qrcode-terminal");
+const mongoService = require("./services/mongoService");
+const { initAuthState: initMongoAuthState } = require("./services/mongoAuthState");
 const fs = require("fs");
 const EventEmitter = require("events");
 
@@ -113,10 +116,28 @@ const store = {
  * Pattern standar Baileys: panggil ulang fungsi ini saat disconnect
  */
 async function startSock() {
-  // 1. Auth state - persistent di folder (mirip LocalAuth)
-  const { state, saveCreds } = await useMultiFileAuthState(
-    "./baileys_auth_info",
-  );
+  // 1. Auth state - MongoDB (primary) → Local file (fallback)
+  let state, saveCreds;
+
+  if (mongoService.isConnected()) {
+    try {
+      console.log("🗄️  Loading WhatsApp auth from MongoDB...");
+      const authResult = await initMongoAuthState();
+      state = authResult.state;
+      saveCreds = authResult.saveCreds;
+      console.log("✅ MongoDB auth state loaded");
+    } catch (error) {
+      console.warn("⚠️ MongoDB auth failed, falling back to local file:", error.message);
+      const fileAuth = await useMultiFileAuthState("./baileys_auth_info");
+      state = fileAuth.state;
+      saveCreds = fileAuth.saveCreds;
+    }
+  } else {
+    console.log("📁 Using local file auth (MongoDB not available)");
+    const fileAuth = await useMultiFileAuthState("./baileys_auth_info");
+    state = fileAuth.state;
+    saveCreds = fileAuth.saveCreds;
+  }
 
   // 2. Fetch versi WhatsApp Web terbaru
   let version;

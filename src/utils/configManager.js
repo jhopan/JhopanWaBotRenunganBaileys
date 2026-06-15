@@ -1,32 +1,20 @@
 /**
  * Config Manager - Persistent Storage untuk Bot Settings
  * Optimized for Renungan Bot Only (GCP Free Tier)
+ *
+ * Storage: MongoDB (primary) → Local JSON file (fallback)
+ * The mongoDataService handles all the try/catch logic transparently.
  */
 
-const fs = require("fs-extra");
-const path = require("path");
-
-const CONFIG_FILE = path.join(__dirname, "../data/bot_config.json");
+const mongoData = require("../services/mongoDataService");
 
 /**
- * Load config dari file
+ * Load config dari storage (MongoDB → file → default)
  */
 async function loadConfig() {
   try {
-    if (await fs.pathExists(CONFIG_FILE)) {
-      return await fs.readJson(CONFIG_FILE);
-    }
-    // Default config - Renungan only
-    return {
-      renunganGroupId: process.env.RENUNGAN_GROUP_ID || "",
-      renunganGroupName: "", // Nama grup utama
-      renunganTime: process.env.RENUNGAN_TIME || "08:00",
-      hideTagEnabled: false,
-      multiGroupEnabled: false,
-      renunganGroups: [],
-      multiGroupDelayMinutes: 2,
-      lastUpdated: new Date().toISOString(),
-    };
+    const config = await mongoData.loadConfig();
+    return config;
   } catch (error) {
     console.error("❌ Error load config:", error.message);
     return null;
@@ -34,14 +22,14 @@ async function loadConfig() {
 }
 
 /**
- * Save config ke file
+ * Save config ke storage (MongoDB → file)
  */
 async function saveConfig(config) {
   try {
     config.lastUpdated = new Date().toISOString();
-    await fs.writeJson(CONFIG_FILE, config, { spaces: 2 });
-    console.log("✅ Config tersimpan");
-    return true;
+    const ok = await mongoData.saveConfig(config);
+    if (ok) console.log("✅ Config tersimpan");
+    return ok;
   } catch (error) {
     console.error("❌ Error save config:", error.message);
     return false;
@@ -145,6 +133,13 @@ async function setMultiGroupDelay(minutes) {
   return config;
 }
 
+/**
+ * Get data storage status (MongoDB or file)
+ */
+function getStorageStatus() {
+  return mongoData.getStatus();
+}
+
 module.exports = {
   loadConfig,
   saveConfig,
@@ -157,4 +152,5 @@ module.exports = {
   addRenunganGroup,
   removeRenunganGroup,
   setMultiGroupDelay,
+  getStorageStatus,
 };

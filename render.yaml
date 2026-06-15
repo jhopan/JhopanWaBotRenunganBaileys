@@ -25,6 +25,9 @@ services:
         value: Asia/Makassar
       - key: RENUNGAN_TIME
         value: "08:00"
+      # ── MongoDB (Recommended for Render!) ──
+      - key: MONGODB_URI
+        sync: false
       # ── Required (set these in Render Dashboard) ──
       - key: TELEGRAM_BOT_TOKEN
         sync: false

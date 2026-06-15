@@ -17,6 +17,7 @@ const {
 const { initWhatsApp } = require("./botWhatsApp");
 const { startRenunganScheduler } = require("./renunganHandler");
 const { loadConfig } = require("./utils/configManager");
+const mongoService = require("./services/mongoService");
 
 // Banner
 const botMode = process.env.WEBHOOK_URL ? "WEBHOOK" : "POLLING";
@@ -75,7 +76,20 @@ console.log(`
   }
 
   try {
-    // 0. Load persistent config
+    // 0a. Initialize MongoDB (if configured)
+    console.log("🗄️  Checking MongoDB connection...");
+    await mongoService.connect();
+    const dbStatus = mongoService.getStatus();
+    if (dbStatus.connected) {
+      console.log(`   ✅ MongoDB: ${dbStatus.database}`);
+    } else {
+      console.log("   📁 MongoDB: not available, using local file storage");
+      if (!dbStatus.configured) {
+        console.log("   💡 Set MONGODB_URI in .env to enable cloud storage");
+      }
+    }
+
+    // 0b. Load persistent config
     console.log("📂 Loading bot configuration...");
     const config = await loadConfig();
     if (config) {
@@ -148,6 +162,13 @@ console.log(`
     // Cleanup webhook jika pakai webhook mode
     try {
       await cleanupWebhook();
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+
+    // Disconnect MongoDB
+    try {
+      await mongoData.disconnect();
     } catch (e) {
       // Ignore cleanup errors
     }

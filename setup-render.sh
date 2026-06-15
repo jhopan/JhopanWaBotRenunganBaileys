@@ -66,6 +66,14 @@ else
   warn "No AI API key found (renungan won't work without it)"
 fi
 
+# MongoDB check
+if [ -n "$MONGODB_URI" ]; then
+  success "MONGODB_URI is set (persistent storage enabled!)"
+else
+  warn "MONGODB_URI not set — data will be lost on restart!"
+  warn "Setup free MongoDB at https://cloud.mongodb.com"
+fi
+
 if [ "$MISSING" -gt 0 ]; then
   echo ""
   error "Missing $MISSING required environment variable(s)!"

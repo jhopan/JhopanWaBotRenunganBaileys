@@ -2,15 +2,16 @@
  * Renungan Handler
  * Mengelola pengiriman renungan harian dengan AI
  * AI akan generate seluruh isi renungan berdasarkan referensi ayat
+ *
+ * Storage: MongoDB (primary) → Local JSON file (fallback)
  */
 
 const cron = require("node-cron");
-const fs = require("fs-extra");
-const path = require("path");
 const moment = require("moment-timezone");
 const { generateRenungan, checkSpecialDay } = require("./services/aiService");
 const wa = require("./botWhatsApp");
 const { loadConfig } = require("./utils/configManager");
+const mongoData = require("./services/mongoDataService");
 
 moment.tz.setDefault(process.env.TIMEZONE || "Asia/Makassar");
 
@@ -18,31 +19,12 @@ moment.tz.setDefault(process.env.TIMEZONE || "Asia/Makassar");
 let renunganCronJob = null;
 
 /**
- * Get verses file path berdasarkan tahun
- */
-function getVersesFilePath(year = null) {
-  const currentYear = year || new Date().getFullYear();
-  return path.join(__dirname, "data", `verses_${currentYear}.json`);
-}
-
-/**
  * Load verses data untuk tahun tertentu
+ * MongoDB → file → empty
  */
 async function loadVerses(year = null) {
   try {
-    const filePath = getVersesFilePath(year);
-
-    // Cek apakah file ada
-    if (!(await fs.pathExists(filePath))) {
-      console.log(
-        `⚠️ File verses tahun ${
-          year || new Date().getFullYear()
-        } tidak ditemukan, gunakan generateYearlyVerses.js dulu`,
-      );
-      return { verses: [], specialDayVerses: {}, metadata: {} };
-    }
-
-    return await fs.readJson(filePath);
+    return await mongoData.loadVerses(year);
   } catch (error) {
     console.error("❌ Error load verses:", error.message);
     return { verses: [], specialDayVerses: {}, metadata: {} };
@@ -51,13 +33,11 @@ async function loadVerses(year = null) {
 
 /**
  * Save verses data untuk tahun tertentu
+ * MongoDB → file
  */
 async function saveVerses(data, year = null) {
   try {
-    const filePath = getVersesFilePath(year || data.year);
-    data.metadata.lastUpdated = new Date().toISOString();
-    data.metadata.totalVerses = data.verses.length;
-    await fs.writeJson(filePath, data, { spaces: 2 });
+    await mongoData.saveVerses(data, year);
   } catch (error) {
     console.error("❌ Error save verses:", error.message);
   }
