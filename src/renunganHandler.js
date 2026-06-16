@@ -313,9 +313,10 @@ async function sendRenungan(isRetry = false) {
  */
 async function previewRenungan() {
   try {
-    const { verseRef, specialDay, isSpecial } = await getVerseForToday();
+    const result = await getVerseForToday();
+    const { verseRef, verseUids, specialDay, isSpecial, theme, verseCount } = result;
 
-    console.log(`📖 Preview ayat: ${verseRef}`);
+    console.log(`📖 Preview ayat: ${verseRef} (${verseCount || 1} ayat, tema: ${theme || "-"})`);
 
     // AI generate seluruh isi renungan
     const message = await generateRenungan(verseRef, specialDay);
@@ -324,8 +325,11 @@ async function previewRenungan() {
       success: true,
       message,
       verse: verseRef,
+      verseUids: verseUids || [],
       specialDay,
       isSpecial,
+      theme: theme || "umum",
+      verseCount: verseCount || 1,
     };
   } catch (error) {
     console.error("❌ Error preview:", error.message);
@@ -335,8 +339,10 @@ async function previewRenungan() {
 
 /**
  * Kirim renungan dengan message yang sudah dibuat (dari preview)
+ * @param {string} message - Pesan renungan yang sudah di-generate
+ * @param {string[]} verseUids - UID ayat yang dipakai (untuk mark as used)
  */
-async function sendRenunganWithMessage(message) {
+async function sendRenunganWithMessage(message, verseUids = []) {
   const groupId = process.env.RENUNGAN_GROUP_ID;
 
   if (!groupId) {
@@ -408,6 +414,11 @@ async function sendRenunganWithMessage(message) {
     }
 
     console.log(`✅ Renungan terkirim ke ${groupId}`);
+
+    // Mark verses as used in pool
+    if (verseUids && verseUids.length > 0) {
+      await versePool.markVersesUsed(verseUids, groupId);
+    }
 
     return {
       success: true,

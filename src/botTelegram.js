@@ -478,10 +478,13 @@ async function handleRenunganCallback(data, chatId, messageId, userId) {
         // Gunakan preview yang sudah dibuat (valid 1 jam)
         sendResult = await renungan.sendRenunganWithMessage(
           savedPreview.message,
+          savedPreview.verseUids || [],
         );
         // Tambahkan data verse dari preview
         sendResult.verse = savedPreview.verse;
         sendResult.specialDay = savedPreview.specialDay;
+        sendResult.theme = savedPreview.theme;
+        sendResult.verseCount = savedPreview.verseCount;
         // Hapus preview setelah dikirim
         previewMessages.delete(userId);
       } else {
@@ -537,7 +540,10 @@ async function handleRenunganCallback(data, chatId, messageId, userId) {
         previewMessages.set(userId, {
           message: preview.message,
           verse: preview.verse,
+          verseUids: preview.verseUids || [],
           specialDay: preview.specialDay,
+          theme: preview.theme,
+          verseCount: preview.verseCount,
           timestamp: Date.now(),
         });
 
@@ -547,8 +553,10 @@ async function handleRenunganCallback(data, chatId, messageId, userId) {
         const specialText = preview.specialDay
           ? `\n🎉 Hari Spesial: ${preview.specialDay}`
           : "";
+        const themeText = preview.theme ? `\n🎨 Tema: ${preview.theme}` : "";
+        const countText = preview.verseCount > 1 ? `\n📝 ${preview.verseCount} ayat` : "";
         await safeEditMessage(
-          `✅ *Preview Generated*\n\n📖 Ayat: ${preview.verse}${specialText}`,
+          `✅ *Preview Generated*\n\n📖 Ayat: ${preview.verse}${countText}${specialText}${themeText}`,
           {
             chat_id: chatId,
             message_id: messageId,
