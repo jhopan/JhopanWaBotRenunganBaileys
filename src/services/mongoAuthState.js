@@ -40,6 +40,28 @@ const { initAuthCreds, proto } = require("@whiskeysockets/baileys");
 const mongoService = require("./mongoService");
 
 // ============================================
+// BUFFER SERIALIZATION HELPERS
+// ============================================
+
+/**
+ * JSON reviver that converts {"type":"Buffer","data":[...]} objects back to real Buffers.
+ * JSON.stringify(Buffer) produces this format, but JSON.parse doesn't restore Buffer.
+ */
+function bufferReviver(key, value) {
+  if (value && typeof value === "object" && value.type === "Buffer" && Array.isArray(value.data)) {
+    return Buffer.from(value.data);
+  }
+  return value;
+}
+
+/**
+ * Safe JSON.parse with Buffer restoration
+ */
+function jsonParseWithBuffers(str) {
+  return JSON.parse(str, bufferReviver);
+}
+
+// ============================================
 // MONGOOSE SCHEMAS & MODELS
 // ============================================
 
@@ -127,7 +149,7 @@ async function loadCreds() {
   if (!doc?.data) return null;
 
   try {
-    return JSON.parse(doc.data);
+    return jsonParseWithBuffers(doc.data);
   } catch (error) {
     console.warn("⚠️ Credential data corrupt, akan generate baru:", error.message);
     return null;
@@ -167,7 +189,7 @@ async function loadKeys(category, ids) {
   const result = {};
   for (const doc of docs) {
     try {
-      result[doc.kid] = JSON.parse(doc.data);
+      result[doc.kid] = jsonParseWithBuffers(doc.data);
     } catch {
       // Skip corrupt key entries
     }
