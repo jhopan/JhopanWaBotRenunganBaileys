@@ -229,26 +229,7 @@ async function getVersesForToday(theme, specialDay = null) {
         isSpecialVerse: true,
       });
     }
-
-    // Add 1-2 extra verses from pool matching related themes
-    const extraCount = Math.floor(Math.random() * 2) + 1; // 1-2
-    const relatedThemes = getRelatedThemes(specialDay.name);
-    let unused = pool.verses.filter(
-      (v) => !v.used && relatedThemes.includes(v.category)
-    );
-    shuffleArray(unused);
-
-    // Filter: hanya ambil ayat yang SATU KITAB dengan ayat spesial
-    if (specialVerseRef && unused.length > 0) {
-      const specialBookMatch = specialVerseRef.match(/^(.+?)\s+\d+:/);
-      const specialBook = specialBookMatch ? specialBookMatch[1] : "";
-      unused = unused.filter((v) => {
-        const bookMatch = v.verse.match(/^(.+?)\s+\d+:/);
-        return bookMatch && bookMatch[1] === specialBook;
-      });
-    }
-
-    selectedVerses.push(...unused.slice(0, extraCount));
+    // Cukup 1 ayat spesial saja (bisa berupa range seperti "Lukas 2:10-14")
 
     return {
       verses: selectedVerses.slice(0, 3), // max 3
@@ -280,23 +261,7 @@ async function getVersesForToday(theme, specialDay = null) {
   } else {
     shuffleArray(unused);
     selectedVerses.push(unused[0]);
-
-    // 30% chance tambah 1 ayat lagi (kalau ada)
-    if (unused.length > 1 && Math.random() < 0.3) {
-      // Cari ayat kedua yang SATU KITAB dengan ayat pertama
-      // Handle nama kitab multi-kata: "1 Timotius", "2 Korintus", dll
-      const firstBookMatch = selectedVerses[0].verse.match(/^(.+?)\s+\d+:/);
-      const firstBook = firstBookMatch ? firstBookMatch[1] : "";
-      const sameBook = unused.filter((v) => {
-        const bookMatch = v.verse.match(/^(.+?)\s+\d+:/);
-        return bookMatch && bookMatch[1] === firstBook;
-      });
-
-      if (sameBook.length > 1) {
-        selectedVerses.push(sameBook[1]);
-      }
-      // Kalau tidak ada yang satu kitab, skip (tidak tambah ayat kedua)
-    }
+    // Cukup 1 ayat saja per hari (bisa berupa range seperti "Mazmur 4:5-7")
   }
 
   return {
