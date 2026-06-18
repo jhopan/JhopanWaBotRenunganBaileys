@@ -61,8 +61,8 @@ Sistem scraping otomatis seluruh Alkitab Terjemahan Baru (31,102 ayat) dari [alk
 ### 🤖 Dual Bot
 WhatsApp (Baileys) + Telegram berjalan bersamaan dalam satu proses.
 
-### 🎂 Ucapan Ulang Tahun
-Otomatis kirim ucapan selamat ulang tahun ke member grup.
+### 🎂 Ucapan Ulang Tahun _(Coming Soon)_
+Fitur ucapan ulang tahun otomatis sedang dalam pengembangan. Komponen AI sudah siap, tinggal wiring scheduler & Telegram UI.
 
 ### 🌐 Multi-Group Support
 Kirim renungan ke beberapa grup dengan delay antar grup (1-10 menit).
@@ -307,6 +307,191 @@ WEBHOOK_PORT=3000
 | `ADMIN_TELEGRAM_IDS` | Chat [@userinfobot](https://t.me/userinfobot) → copy ID |
 | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) → Create API Key |
 | `MONGO_URI` | [MongoDB Atlas](https://www.mongodb.com/atlas) → Free tier (512MB) |
+
+---
+
+## 🚀 Deployment Guide: Render + MongoDB Atlas
+
+Panduan deploy gratis/paling murah: **Render** (hosting) + **MongoDB Atlas** (database).
+
+### Step 1: Setup MongoDB Atlas (Database)
+
+```
+1. Daftar di https://www.mongodb.com/atlas (gratis)
+
+2. Buat Organization & Project
+   → Organization: nama bebas (misal "JhopanBot")
+   → Project: "wa-renungan-bot"
+
+3. Buat Cluster (FREE TIER - M0)
+   → Provider: AWS / GCP / Azure (pilih yang terdekat)
+   → Region: Singapore (ap-southeast-1) ← terdekat dari Indonesia
+   → Cluster Name: "wa-bot-cluster"
+   → Tier: M0 FREE (512 MB storage)
+
+4. Buat Database User
+   → Security → Database Access → Add New User
+   → Username: wa_bot_user (bebas)
+   → Password: (generate random, CATAT!)
+   → Role: Read and write to any database
+   → Create User
+
+5. Whitelist IP
+   → Network Access → Add IP Address
+   → Pilih "Allow Access from Anywhere" (0.0.0.0/0)
+     ⚠️  Wajib 0.0.0.0/0 karena Render IP dinamis
+   → Confirm
+
+6. Ambil Connection String
+   → Database → Connect → Drivers → Node.js
+   → Copy URI, format:
+     mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<dbname>
+   
+   → Ganti <username> dan <password> dengan yang kamu buat
+   → Ganti <dbname> dengan: wa_renungan_bot
+   
+   Contoh final:
+     mongodb+srv://wa_bot_user:***@cluster0.xxxxx.mongodb.net/wa_renungan_bot
+```
+
+### Step 2: Push Code ke GitHub
+
+```bash
+# Pastikan semua kode sudah di-push
+git add .
+git commit -m "ready for deploy"
+git push origin main
+```
+
+### Step 3: Deploy ke Render
+
+```
+1. Daftar di https://render.com (bisa pakai GitHub login)
+
+2. Buat Web Service
+   → Dashboard → New → Web Service
+   → Connect repo: pilih "JhopanWaBotRenungan"
+   → Name: "wa-renungan-bot"
+   → Region: Singapore (closest to Indonesia)
+   → Branch: main
+   → Runtime: Node
+   → Build Command: npm install
+   → Start Command: npm start
+
+3. Instance Type
+   → Free (spin down setelah 15 menit idle)
+   ATAU
+   → Starter $7/bulan (always on, recommended)
+   
+   ⚠️  Free tier akan sleep setelah 15 menit tanpa traffic!
+       Solusi: pakai webhook mode + Cloudflare Tunnel
+       atau pakai cron-job.org untuk ping setiap 10 menit
+
+4. Environment Variables (⚠️ PENTING — set semua di sini!)
+   → Klik "Advanced" → "Add Environment Variable"
+   
+   ┌──────────────────────┬──────────────────────────────────────┐
+   │ Key                  │ Value                                │
+   ├──────────────────────┼──────────────────────────────────────┤
+   │ NODE_ENV             │ production                           │
+   │ TIMEZONE             │ Asia/Makassar                        │
+   │ TELEGRAM_BOT_TOKEN   │ (token dari @BotFather)              │
+   │ ADMIN_TELEGRAM_IDS   │ (Telegram user ID kamu)              │
+   │ GEMINI_API_KEY       │ (API key dari Google AI Studio)      │
+   │ MONGO_URI            │ (connection string dari MongoDB)     │
+   │ RENUNGAN_TIME        │ 08:00                                │
+   │ VERSE_MODE           │ pool                                 │
+   │ WEBHOOK_URL          │ https://wa-renungan-bot.onrender.com │
+   │ WEBHOOK_PORT         │ 10000                                │
+   └──────────────────────┴──────────────────────────────────────┘
+
+   ⚠️ JANGAN pernah commit credentials ke GitHub!
+   ⚠️ Semua secrets hanya di Render Environment Variables!
+
+5. Deploy
+   → Klik "Create Web Service"
+   → Tunggu build selesai (~2-3 menit)
+   → Cek logs: "✅ Bot siap!" = berhasil
+
+6. (Opsional) Keep-Alive untuk Free Tier
+   → Buka https://cron-job.org (gratis)
+   → Buat cron job:
+     URL: https://wa-renungan-bot.onrender.com/health
+     Schedule: Every 10 minutes
+   → Ini mencegah Render sleep
+```
+
+### Step 4: Verifikasi
+
+```
+Setelah deploy berhasil:
+
+1. Cek Render Logs:
+   ✅ MongoDB connected
+   ✅ WhatsApp client ready (atau QR muncul)
+   ✅ Telegram bot started
+   ✅ Renungan scheduler started
+   ✅ Bible scrape scheduler started
+
+2. Scan QR WhatsApp:
+   → QR dikirim otomatis ke Telegram admin
+   → Scan dari WhatsApp → Linked Devices
+
+3. Test dari Telegram:
+   → /start → muncul menu
+   → /status → semua hijau ✅
+   → /renungan → test kirim renungan
+
+4. Bible Scrape:
+   → Cek log: "🕐 [Scraper] Memulai Bible Scrape Scheduler"
+   → Otomatis scrape 1 kitab/jam
+   → ~3 hari selesai → otomatis stop
+```
+
+### Estimasi Biaya
+
+```
+┌─────────────────┬────────────────────┬──────────────┐
+│ Service         │ Plan               │ Biaya/Bulan  │
+├─────────────────┼────────────────────┼──────────────┤
+│ Render          │ Free (spin down)   │ Rp 0         │
+│ Render          │ Starter (always on)│ ~Rp 110.000  │
+│ MongoDB Atlas   │ M0 Free (512MB)    │ Rp 0         │
+│ Gemini API      │ Free tier          │ Rp 0         │
+│ Cloudflare      │ Free               │ Rp 0         │
+│ Domain          │ .my.id / .com      │ Rp 15-150rb  │
+├─────────────────┼────────────────────┼──────────────┤
+│ TOTAL (Free)    │                    │ Rp 0         │
+│ TOTAL (Starter) │                    │ ~Rp 125.000  │
+└─────────────────┴────────────────────┴──────────────┘
+
+* Gemini Flash-Lite free tier: 1,500 requests/hari
+  Renungan 1x/hari = 30/bulan → JAUH di bawah limit
+* MongoDB M0: 512MB storage, shared RAM
+  Bible text ~15MB → masih sisa 497MB
+```
+
+### ⚠️ Penting untuk Render Free Tier
+
+```
+Masalah: Render free tier sleep setelah 15 menit idle
+Dampak:  Bot mati, renungan tidak terkirim
+
+Solusi (pilih salah satu):
+┌──────────────────────────────────────────────────────────┐
+│ 1. Webhook + Cloudflare Tunnel (RECOMMENDED)            │
+│    → Telegram kirim webhook ke bot → bot tetap awake    │
+│    → Set WEBHOOK_URL = URL Render kamu                  │
+│                                                          │
+│ 2. Cron-job.org Ping                                    │
+│    → Ping /health endpoint setiap 10 menit              │
+│    → Gratis, reliable                                   │
+│                                                          │
+│ 3. Upgrade ke Starter ($7/bulan)                        │
+│    → Always on, tidak ada sleep                         │
+│    → Paling hassle-free                                 │
+└──────────────────────────────────────────────────────────┘
+```
 
 ---
 
