@@ -11,6 +11,10 @@ const fs = require('fs');
 const path = require('path');
 const moment = require('moment-timezone');
 const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 
 const TEMP_DIR = path.join(__dirname, '../../temp/tts_audio');
 
@@ -219,7 +223,8 @@ async function generateTTS(text, options = {}) {
   const pitch = convertPitch(options.pitch || process.env.TTS_PITCH || '+0Hz');
   
   const timestamp = Date.now();
-  const outputPath = path.join(TEMP_DIR, `renungan_${timestamp}.mp3`);
+  const mp3Path = path.join(TEMP_DIR, `renungan_${timestamp}.mp3`);
+  const oggPath = path.join(TEMP_DIR, `renungan_${timestamp}.ogg`);
   
   // Preprocess text
   const preprocessedText = smartPreprocessForTTS(text);
@@ -230,43 +235,45 @@ async function generateTTS(text, options = {}) {
   console.log(`   Date: ${moment().tz(process.env.TIMEZONE || 'Asia/Makassar').format('DD MMMM YYYY')} (Tanggal ${moment().date()})`);
   
   try {
-    // Initialize msedge-tts client
+    // Step 1: Generate MP3 from msedge-tts
     const tts = new MsEdgeTTS();
     await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
     
-    // Generate audio stream
     const { audioStream } = tts.toStream(preprocessedText, { rate, pitch });
     
-    // Write stream to file
     await new Promise((resolve, reject) => {
-      const writeStream = fs.createWriteStream(outputPath);
+      const writeStream = fs.createWriteStream(mp3Path);
       audioStream.pipe(writeStream);
       writeStream.on('finish', resolve);
       writeStream.on('error', reject);
       audioStream.on('error', reject);
-      
-      // Timeout after 2 minutes
       setTimeout(() => reject(new Error('TTS generation timeout (120s)')), 120000);
     });
     
-    // Close the WebSocket connection
     tts.close();
     
-    // Verify file was created and has content
-    const stats = fs.statSync(outputPath);
+    // Step 2: Convert MP3 → OGG Opus (WhatsApp voice message format)
+    console.log('   🔄 Converting MP3 → OGG (WhatsApp compatible)...');
+    const ffmpegCmd = `"${ffmpegPath}" -i "${mp3Path}" -c:a libopus -b:a 48k -ac 1 -ar 48000 "${oggPath}" -y`;
+    await execAsync(ffmpegCmd, { timeout: 60000 });
+    
+    // Step 3: Cleanup intermediate MP3
+    try { fs.unlinkSync(mp3Path); } catch (e) { /* ignore */ }
+    
+    // Verify OGG file
+    const stats = fs.statSync(oggPath);
     if (stats.size < 1000) {
       throw new Error(`Audio file too small (${stats.size} bytes) — likely empty`);
     }
     
-    console.log(`✅ TTS audio generated: ${outputPath} (${(stats.size / 1024).toFixed(0)} KB)`);
-    return outputPath;
+    console.log(`✅ TTS audio generated: ${oggPath} (${(stats.size / 1024).toFixed(0)} KB)`);
+    return oggPath;
     
   } catch (error) {
     console.error('❌ TTS generation failed:', error.message);
-    // Cleanup partial file
-    try {
-      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-    } catch (e) { /* ignore */ }
+    // Cleanup partial files
+    try { if (fs.existsSync(mp3Path)) fs.unlinkSync(mp3Path); } catch (e) { /* ignore */ }
+    try { if (fs.existsSync(oggPath)) fs.unlinkSync(oggPath); } catch (e) { /* ignore */ }
     throw error;
   }
 }

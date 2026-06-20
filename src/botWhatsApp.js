@@ -728,7 +728,7 @@ async function sendVoiceMessage(to, audioPath) {
   
   return sock.sendMessage(to, {
     audio: audioBuffer,
-    mimetype: 'audio/mpeg',
+    mimetype: 'audio/ogg; codecs=opus',
     ptt: true // Push-to-talk (voice message)
   });
 }
