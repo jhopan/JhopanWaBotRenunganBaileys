@@ -34,6 +34,16 @@ info "Installing dependencies..."
 npm install --production
 success "Dependencies installed ($(ls node_modules | wc -l) packages)"
 
+# ── Step 1b: Install Python dependencies (for TTS) ──
+info "Installing Python dependencies (edge-tts for TTS)..."
+if command -v pip3 &> /dev/null; then
+  pip3 install -r requirements.txt --quiet 2>/dev/null && success "edge-tts installed" || warn "edge-tts install failed (TTS will not work)"
+elif command -v pip &> /dev/null; then
+  pip install -r requirements.txt --quiet 2>/dev/null && success "edge-tts installed" || warn "edge-tts install failed (TTS will not work)"
+else
+  warn "pip not found — TTS will not work. Add Python buildpack in Render."
+fi
+
 # ── Step 2: Create logs directory ──
 mkdir -p logs
 success "Logs directory ready"
@@ -74,6 +84,17 @@ else
   warn "Setup free MongoDB at https://cloud.mongodb.com"
 fi
 
+# TTS check
+if [ "$TTS_ENABLED" = "true" ]; then
+  if command -v edge-tts &> /dev/null; then
+    success "TTS enabled and edge-tts found"
+  else
+    warn "TTS enabled but edge-tts not installed — audio will not be generated"
+  fi
+else
+  info "TTS disabled (set TTS_ENABLED=true to enable)"
+fi
+
 if [ "$MISSING" -gt 0 ]; then
   echo ""
   error "Missing $MISSING required environment variable(s)!"
@@ -91,6 +112,8 @@ if [ "$MISSING" -gt 0 ]; then
   echo "    AI_MODEL           = gemini/gemini-2.5-flash-lite"
   echo "    TIMEZONE           = Asia/Makassar"
   echo "    RENUNGAN_TIME      = 08:00"
+  echo "    VERSE_MODE         = bible"
+  echo "    TTS_ENABLED        = true"
   echo ""
 fi
 
