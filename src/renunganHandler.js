@@ -81,14 +81,36 @@ async function getVerseForTodayBible() {
     console.log(`📅 Fallback theme: ${theme}`);
   }
   
-  // Try to get verse range by theme from bible_verses (multi-ayat dari pasal yang sama)
+  // Decide verse count based on context
+  let minVerses = 1;
+  let maxVerses = 1;
+  
+  if (isSpecial) {
+    // Hari spesial: 2-3 ayat (lebih banyak konteks)
+    minVerses = 2;
+    maxVerses = 3;
+  } else {
+    // Hari biasa: random 1-2 ayat (70% single, 30% double)
+    const randomChance = Math.random();
+    if (randomChance < 0.7) {
+      // 70% chance: 1 ayat (bisa range seperti "Mazmur 23:1-3")
+      minVerses = 1;
+      maxVerses = 1;
+    } else {
+      // 30% chance: 2 ayat (untuk konteks lebih)
+      minVerses = 2;
+      maxVerses = 2;
+    }
+  }
+  
+  // Try to get verse range by theme from bible_verses
   let verseData = null;
   try {
     if (theme !== "umum") {
-      // Try theme-based selection first (2-4 ayat dari pasal yang sama)
+      // Try theme-based selection first
       verseData = await bibleVerseDB.getRandomVerseRangeByTheme(theme, { 
-        minVerses: 2, 
-        maxVerses: 4 
+        minVerses, 
+        maxVerses 
       });
       if (verseData) {
         console.log(`📖 Found verse range for theme: ${theme}`);
@@ -98,8 +120,8 @@ async function getVerseForTodayBible() {
     // Fallback to random range if no theme match
     if (!verseData) {
       verseData = await bibleVerseDB.getRandomVerseRange({ 
-        minVerses: 2, 
-        maxVerses: 4 
+        minVerses, 
+        maxVerses 
       });
       console.log(`📖 Using random verse range (no theme match)`);
     }
@@ -116,8 +138,9 @@ async function getVerseForTodayBible() {
   
   const verseRef = verseData.ref;
   const verseUids = []; // Bible mode doesn't use UIDs (no tracking)
+  const actualVerseCount = verseData.verseEnd - verseData.verseStart + 1;
   
-  console.log(`📖 Verse: ${verseRef} (${verseData.verseEnd - verseData.verseStart + 1} ayat, tema: ${theme})`);
+  console.log(`📖 Verse: ${verseRef} (${actualVerseCount} ayat, tema: ${theme})`);
   
   return {
     verseRef,
@@ -125,7 +148,7 @@ async function getVerseForTodayBible() {
     specialDay,
     isSpecial,
     theme,
-    verseCount: verseData.verseEnd - verseData.verseStart + 1,
+    verseCount: actualVerseCount,
     verseData, // Pass full verse data for AI
   };
 }
