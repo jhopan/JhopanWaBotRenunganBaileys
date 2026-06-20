@@ -20,6 +20,7 @@ const mongoData = require("./services/mongoDataService");
 const bibleVerseDB = require("./services/bibleVerseDB");
 const bibleScraper = require("./services/bibleScrapeScheduler");
 const mongoService = require("./services/mongoService");
+const ttsService = require("./services/ttsService");
 
 moment.tz.setDefault(process.env.TIMEZONE || "Asia/Makassar");
 
@@ -251,6 +252,19 @@ async function sendRenungan(isRetry = false) {
     const renunganGroups = config.renunganGroups || [];
     const delayMinutes = config.multiGroupDelayMinutes || 2;
 
+    // Generate TTS audio (if enabled)
+    let audioPath = null;
+    const ttsEnabled = process.env.TTS_ENABLED === 'true';
+    if (ttsEnabled) {
+      try {
+        audioPath = await ttsService.generateTTS(message);
+        console.log('✅ TTS audio generated');
+      } catch (ttsError) {
+        console.error('⚠️ TTS generation failed:', ttsError.message);
+        // Continue without audio
+      }
+    }
+
     // Fungsi helper untuk kirim ke satu grup
     const sendToGroup = async (targetGroupId) => {
       if (useHideTag) {
@@ -258,6 +272,16 @@ async function sendRenungan(isRetry = false) {
       } else {
         await wa.sendMessage(targetGroupId, message);
       }
+      
+      // Kirim audio (jika ada)
+      if (audioPath) {
+        try {
+          await wa.sendVoiceMessage(targetGroupId, audioPath);
+        } catch (audioError) {
+          console.error('⚠️ Failed to send audio:', audioError.message);
+        }
+      }
+      
       console.log(
         `✅ Renungan terkirim ke ${targetGroupId} (hideTag: ${useHideTag})`,
       );
@@ -272,9 +296,12 @@ async function sendRenungan(isRetry = false) {
         `📢 Multi-group mode: akan kirim ke ${renunganGroups.length} grup tambahan`,
       );
 
-      for (let i = 0; i < renunganGroups.length; i++) {
-        const group = renunganGroups[i];
-        if (group.id === groupId) continue; // Skip grup utama
+      // Filter grup tambahan (bukan grup utama)
+      const additionalGroups = renunganGroups.filter(g => g.id !== groupId);
+
+      for (let i = 0; i < additionalGroups.length; i++) {
+        const group = additionalGroups[i];
+        const isLastGroup = i === additionalGroups.length - 1;
 
         // Delay antara grup (1-3 menit acak atau sesuai config)
         const delayMs = delayMinutes * 60 * 1000 + Math.random() * 60000;
@@ -291,10 +318,20 @@ async function sendRenungan(isRetry = false) {
                 `❌ Gagal kirim ke grup ${group.name || group.id}:`,
                 err.message,
               );
+            } finally {
+              // Cleanup audio after last group is processed
+              if (isLastGroup && audioPath) {
+                ttsService.cleanupAudio(audioPath);
+              }
             }
           },
           delayMs * (i + 1),
         );
+      }
+    } else {
+      // Single group mode: cleanup audio immediately after sending
+      if (audioPath) {
+        ttsService.cleanupAudio(audioPath);
       }
     }
 
@@ -377,6 +414,18 @@ async function previewRenungan() {
     // AI generate renungan
     const message = await generateRenungan(verseRef, specialDay, verseData);
 
+    // Generate TTS audio (if enabled)
+    let audioPath = null;
+    const ttsEnabled = process.env.TTS_ENABLED === 'true';
+    if (ttsEnabled) {
+      try {
+        audioPath = await ttsService.generateTTS(message);
+        console.log('✅ TTS audio generated for preview');
+      } catch (ttsError) {
+        console.error('⚠️ TTS generation failed:', ttsError.message);
+      }
+    }
+
     return {
       success: true,
       message,
@@ -386,6 +435,7 @@ async function previewRenungan() {
       isSpecial,
       theme: theme || "umum",
       verseCount: verseCount || 1,
+      audioPath,
     };
   } catch (error) {
     console.error("❌ Error preview:", error.message);

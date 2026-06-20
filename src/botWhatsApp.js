@@ -710,6 +710,29 @@ async function getGroupInfoFromInviteLink(inviteLink) {
 // EXPORTS (Interface SAMA persis dengan versi lama)
 // ============================================
 
+/**
+ * Kirim voice message (audio)
+ * @param {string} to - JID tujuan
+ * @param {string} audioPath - Path ke file audio (MP3)
+ */
+async function sendVoiceMessage(to, audioPath) {
+  if (!(await isConnected())) {
+    throw new Error("WhatsApp tidak terhubung");
+  }
+
+  if (!fs.existsSync(audioPath)) {
+    throw new Error(`Audio file not found: ${audioPath}`);
+  }
+
+  const audioBuffer = fs.readFileSync(audioPath);
+  
+  return sock.sendMessage(to, {
+    audio: audioBuffer,
+    mimetype: 'audio/mpeg',
+    ptt: true // Push-to-talk (voice message)
+  });
+}
+
 module.exports = {
   initWhatsApp,
   setAdminChatId,
@@ -718,6 +741,7 @@ module.exports = {
   getConnectionState,
   sendMessage,
   sendMessageWithHideTag,
+  sendVoiceMessage,
   sendMedia,
   getChats,
   getContacts,
