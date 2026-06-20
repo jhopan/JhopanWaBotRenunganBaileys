@@ -447,8 +447,9 @@ async function previewRenungan() {
  * Kirim renungan dengan message yang sudah dibuat (dari preview)
  * @param {string} message - Pesan renungan yang sudah di-generate
  * @param {string[]} verseUids - UID ayat yang dipakai (untuk mark as used)
+ * @param {string} audioPath - Path ke file audio (opsional)
  */
-async function sendRenunganWithMessage(message, verseUids = []) {
+async function sendRenunganWithMessage(message, verseUids = [], audioPath = null) {
   const groupId = process.env.RENUNGAN_GROUP_ID;
 
   if (!groupId) {
@@ -479,6 +480,16 @@ async function sendRenunganWithMessage(message, verseUids = []) {
       } else {
         await wa.sendMessage(targetGroupId, message);
       }
+      
+      // Kirim audio (jika ada)
+      if (audioPath) {
+        try {
+          await wa.sendVoiceMessage(targetGroupId, audioPath);
+        } catch (audioError) {
+          console.error('⚠️ Failed to send audio:', audioError.message);
+        }
+      }
+      
       console.log(
         `✅ Renungan terkirim ke ${targetGroupId} (hideTag: ${useHideTag})`,
       );
@@ -507,6 +518,11 @@ async function sendRenunganWithMessage(message, verseUids = []) {
               console.log(
                 `✅ Renungan terkirim ke grup ${group.name || group.id}`,
               );
+              
+              // Cleanup audio after last group
+              if (i === renunganGroups.length - 1 && audioPath) {
+                ttsService.cleanupAudio(audioPath);
+              }
             } catch (err) {
               console.error(
                 `❌ Gagal kirim ke grup ${group.name || group.id}:`,
@@ -516,6 +532,11 @@ async function sendRenunganWithMessage(message, verseUids = []) {
           },
           delayMs * (i + 1),
         );
+      }
+    } else {
+      // Single group mode: cleanup immediately
+      if (audioPath) {
+        ttsService.cleanupAudio(audioPath);
       }
     }
 

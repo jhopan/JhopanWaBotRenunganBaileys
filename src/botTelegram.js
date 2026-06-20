@@ -479,6 +479,7 @@ async function handleRenunganCallback(data, chatId, messageId, userId) {
         sendResult = await renungan.sendRenunganWithMessage(
           savedPreview.message,
           savedPreview.verseUids || [],
+          savedPreview.audioPath || null,
         );
         // Tambahkan data verse dari preview
         sendResult.verse = savedPreview.verse;
@@ -544,11 +545,27 @@ async function handleRenunganCallback(data, chatId, messageId, userId) {
           specialDay: preview.specialDay,
           theme: preview.theme,
           verseCount: preview.verseCount,
+          audioPath: preview.audioPath || null,
           timestamp: Date.now(),
         });
 
         // Kirim preview tanpa markdown karena sudah diformat untuk WhatsApp
         await bot.sendMessage(chatId, preview.message);
+
+        // Kirim audio preview (jika TTS enabled)
+        if (preview.audioPath) {
+          try {
+            const fs = require('fs');
+            if (fs.existsSync(preview.audioPath)) {
+              await bot.sendVoice(chatId, preview.audioPath, {
+                caption: '🔊 Preview Audio Renungan'
+              });
+              console.log('✅ Preview audio sent to Telegram');
+            }
+          } catch (audioError) {
+            console.error('⚠️ Failed to send preview audio:', audioError.message);
+          }
+        }
 
         const specialText = preview.specialDay
           ? `\n🎉 Hari Spesial: ${preview.specialDay}`
