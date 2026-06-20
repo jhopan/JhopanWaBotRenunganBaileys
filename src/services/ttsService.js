@@ -122,7 +122,13 @@ function smartPreprocessForTTS(text) {
   // Process each segment
   return segments.map(seg => {
     if (seg.isQuote) {
-      return cleanFormattingOnly(seg.text);
+      // Quote (sacred): clean formatting + fix pronunciation ONLY (no word changes)
+      let text = cleanFormattingOnly(seg.text);
+      // Pronouns must be fixed even in quotes — TTS reads "umat-Mu" as "umat emyu" without this
+      text = text.replace(/([a-z])-(Mu)\b/gi, '$1mu');
+      text = text.replace(/([a-z])-(Nya)\b/gi, '$1nya');
+      text = text.replace(/([a-z])-(Ku)\b/gi, '$1ku');
+      return text;
     } else {
       return fullPreprocess(seg.text);
     }
