@@ -124,22 +124,24 @@ function fullPreprocess(text) {
   let cleaned = text;
   
   // Verse references: "Yohanes 3:16" → "Yohanes pasal tiga ayat enam belas"
+  // Support multi-word book names: "1 Korintus", "Kisah Para Rasul", etc.
   cleaned = cleaned.replace(
-    /(\w+(?:\s+\w+)?)\s+(\d+):(\d+)-(\d+)/g,
+    /((?:\d\s+)?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(\d+):(\d+)-(\d+)/g,
     (m, book, ch, v1, v2) => 
       `${book} pasal ${numberToWords(+ch)} ayat ${numberToWords(+v1)} sampai ${numberToWords(+v2)}`
   );
   
   cleaned = cleaned.replace(
-    /(\w+(?:\s+\w+)?)\s+(\d+):(\d+)/g,
+    /((?:\d\s+)?[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(\d+):(\d+)/g,
     (m, book, ch, v) => 
       `${book} pasal ${numberToWords(+ch)} ayat ${numberToWords(+v)}`
   );
   
   // Pronouns: "-Mu" → "mu", "-Nya" → "nya" (lowercase, attached)
-  cleaned = cleaned.replace(/-(Mu)\b/gi, 'mu');
-  cleaned = cleaned.replace(/-(Nya)\b/gi, 'nya');
-  cleaned = cleaned.replace(/-(Ku)\b/gi, 'ku');
+  // Only match after lowercase letter to avoid false positives
+  cleaned = cleaned.replace(/([a-z])-(Mu)\b/gi, '$1mu');
+  cleaned = cleaned.replace(/([a-z])-(Nya)\b/gi, '$1nya');
+  cleaned = cleaned.replace(/([a-z])-(Ku)\b/gi, '$1ku');
   
   // Formatting
   cleaned = cleanFormattingOnly(cleaned);
@@ -172,6 +174,13 @@ function numberToWords(num) {
     const rem = num % 100;
     return units[hundreds] + ' ratus' + (rem ? ' ' + numberToWords(rem) : '');
   }
+  if (num < 2000) return 'seribu' + (num > 1000 ? ' ' + numberToWords(num - 1000) : '');
+  if (num < 1000000) {
+    const thousands = Math.floor(num / 1000);
+    const rem = num % 1000;
+    return numberToWords(thousands) + ' ribu' + (rem ? ' ' + numberToWords(rem) : '');
+  }
+  // Fallback: return as string for very large numbers
   return num.toString();
 }
 
@@ -198,23 +207,30 @@ async function generateTTS(text, options = {}) {
   console.log(`   Date: ${moment().tz(process.env.TIMEZONE || 'Asia/Makassar').format('DD MMMM YYYY')} (Tanggal ${moment().date()})`);
   
   try {
-    // Escape text for shell
-    const escapedText = preprocessedText.replace(/"/g, '\\"');
-    
     // Write text to temp file to avoid shell escaping issues
     const textFilePath = path.join(TEMP_DIR, `text_${timestamp}.txt`);
     fs.writeFileSync(textFilePath, preprocessedText, 'utf-8');
     
-    await execAsync(
-      `edge-tts --voice "${voice}" --rate="${rate}" --pitch="${pitch}" --text "$(cat '${textFilePath}')" --write-media "${outputPath}"`,
-      { timeout: 120000, shell: '/bin/bash' } // 2 minute timeout
-    );
-    
-    // Cleanup text file
-    fs.unlinkSync(textFilePath);
-    
-    console.log(`✅ TTS audio generated: ${outputPath}`);
-    return outputPath;
+    try {
+      // Use file input instead of shell command to avoid injection
+      await execAsync(
+        `edge-tts --voice "${voice}" --rate="${rate}" --pitch="${pitch}" --file "${textFilePath}" --write-media "${outputPath}"`,
+        { timeout: 120000, shell: true } // 2 minute timeout, auto-detect shell
+      );
+      
+      console.log(`✅ TTS audio generated: ${outputPath}`);
+      return outputPath;
+      
+    } finally {
+      // Always cleanup text file (even on error)
+      try {
+        if (fs.existsSync(textFilePath)) {
+          fs.unlinkSync(textFilePath);
+        }
+      } catch (cleanupErr) {
+        console.warn('⚠️ Failed to cleanup text file:', cleanupErr.message);
+      }
+    }
     
   } catch (error) {
     console.error('❌ TTS generation failed:', error.message);
