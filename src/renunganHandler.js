@@ -81,21 +81,27 @@ async function getVerseForTodayBible() {
     console.log(`📅 Fallback theme: ${theme}`);
   }
   
-  // Try to get verses by theme from bible_verses
-  let verses = [];
+  // Try to get verse range by theme from bible_verses (multi-ayat dari pasal yang sama)
+  let verseData = null;
   try {
     if (theme !== "umum") {
-      // Try theme-based selection first
-      verses = await bibleVerseDB.getRandomVersesByTheme(theme, { count: 1 });
-      if (verses.length > 0) {
-        console.log(`📖 Found ${verses.length} verse(s) for theme: ${theme}`);
+      // Try theme-based selection first (2-4 ayat dari pasal yang sama)
+      verseData = await bibleVerseDB.getRandomVerseRangeByTheme(theme, { 
+        minVerses: 2, 
+        maxVerses: 4 
+      });
+      if (verseData) {
+        console.log(`📖 Found verse range for theme: ${theme}`);
       }
     }
     
-    // Fallback to random if no theme match
-    if (verses.length === 0) {
-      verses = await bibleVerseDB.getRandomVerses({ count: 1 });
-      console.log(`📖 Using random verse (no theme match)`);
+    // Fallback to random range if no theme match
+    if (!verseData) {
+      verseData = await bibleVerseDB.getRandomVerseRange({ 
+        minVerses: 2, 
+        maxVerses: 4 
+      });
+      console.log(`📖 Using random verse range (no theme match)`);
     }
   } catch (err) {
     console.error(`⚠️ Error getting verses from bible_verses: ${err.message}`);
@@ -103,23 +109,24 @@ async function getVerseForTodayBible() {
     return { verseRef: "Mazmur 119:105", verseUids: [], specialDay: null, isSpecial: false, theme: "umum" };
   }
   
-  if (verses.length === 0) {
+  if (!verseData) {
     console.error(`⚠️ No verses available in bible_verses`);
     return { verseRef: "Mazmur 119:105", verseUids: [], specialDay: null, isSpecial: false, theme: "umum" };
   }
   
-  const verseRefs = verses.map(v => v.ref).join("; ");
+  const verseRef = verseData.ref;
   const verseUids = []; // Bible mode doesn't use UIDs (no tracking)
   
-  console.log(`📖 Verse(s): ${verseRefs} (${verses.length} ayat, tema: ${theme})`);
+  console.log(`📖 Verse: ${verseRef} (${verseData.verseEnd - verseData.verseStart + 1} ayat, tema: ${theme})`);
   
   return {
-    verseRef: verseRefs,
+    verseRef,
     verseUids,
     specialDay,
     isSpecial,
     theme,
-    verseCount: verses.length,
+    verseCount: verseData.verseEnd - verseData.verseStart + 1,
+    verseData, // Pass full verse data for AI
   };
 }
 
@@ -259,7 +266,7 @@ async function sendRenungan(isRetry = false) {
     );
 
     // Get referensi ayat hari ini
-    const { verseRef, verseUids, specialDay, isSpecial, theme, verseCount } = await getVerseForToday();
+    const { verseRef, verseUids, specialDay, isSpecial, theme, verseCount, verseData: preloadedVerseData } = await getVerseForToday();
 
     if (isSpecial) {
       console.log(`🎉 Hari spesial: ${specialDay}`);
@@ -268,8 +275,10 @@ async function sendRenungan(isRetry = false) {
     console.log(`📖 Ayat (${verseCount || 1}): ${verseRef}`);
 
     // ===== VERSE INJECT: Ambil teks ayat dari database =====
-    let verseData = null;
-    if (mongoService.isConnected()) {
+    let verseData = preloadedVerseData || null; // Use preloaded data if available (Bible mode)
+    
+    // If no preloaded data, fetch from database (Pool/Yearly mode)
+    if (!verseData && mongoService.isConnected()) {
       try {
         // verseRef bisa multi-ayat: "Roma 8:28; Roma 8:30" atau "Roma 8:28, Roma 8:30"
         const refs = verseRef.split(/[;,]/).map(r => r.trim()).filter(Boolean);
@@ -296,6 +305,8 @@ async function sendRenungan(isRetry = false) {
         console.log(`   ⚠️  Gagal ambil verse text: ${err.message}`);
         // Fallback ke mode lama (AI harus ingat ayat sendiri)
       }
+    } else if (verseData) {
+      console.log(`   ✅ Using preloaded verse data (Bible mode)`);
     }
 
     // AI generate renungan (dengan verse text jika tersedia)

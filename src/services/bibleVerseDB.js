@@ -289,6 +289,80 @@ async function getRandomVersesByTheme(theme, options = {}) {
 }
 
 /**
+ * Get random verse RANGE by theme (multi-ayat dari pasal yang sama)
+ * Example: Mazmur 3:3-5 (3 ayat dari pasal yang sama)
+ * @param {string} theme - Theme keyword
+ * @param {Object} options - { minVerses: 2, maxVerses: 4, excludeRefs: [] }
+ * @returns {Promise<{ref, text, pericope, book, chapter, verseStart, verseEnd}|null>}
+ */
+async function getRandomVerseRangeByTheme(theme, options = {}) {
+  const Model = getModel();
+  const { minVerses = 2, maxVerses = 4, excludeRefs = [] } = options;
+
+  // Build query: search in pericope (case-insensitive)
+  const query = {
+    pericope: { $regex: theme, $options: 'i' }
+  };
+
+  // Exclude already used refs
+  if (excludeRefs.length > 0) {
+    query.ref = { $nin: excludeRefs };
+  }
+
+  // Get total count
+  const totalCount = await Model.countDocuments(query);
+  if (totalCount === 0) {
+    console.log(`⚠️ No verses found for theme: ${theme}`);
+    return null;
+  }
+
+  // Random pick 1 verse
+  const [startVerse] = await Model.aggregate([
+    { $match: query },
+    { $sample: { size: 1 } },
+    { $project: { _id: 0, ref: 1, book: 1, chapter: 1, verseStart: 1, pericope: 1 } }
+  ]);
+
+  if (!startVerse) return null;
+
+  // Random count between minVerses and maxVerses
+  const verseCount = Math.floor(Math.random() * (maxVerses - minVerses + 1)) + minVerses;
+
+  // Get consecutive verses from same chapter
+  const verses = await Model.find({
+    book: startVerse.book,
+    chapter: startVerse.chapter,
+    verseStart: { $gte: startVerse.verseStart, $lt: startVerse.verseStart + verseCount }
+  })
+    .sort({ verseStart: 1 })
+    .lean();
+
+  if (verses.length === 0) return null;
+
+  // Build range ref
+  const firstVerse = verses[0].verseStart;
+  const lastVerse = verses[verses.length - 1].verseStart;
+  const rangeRef = verses.length === 1
+    ? `${startVerse.book} ${startVerse.chapter}:${firstVerse}`
+    : `${startVerse.book} ${startVerse.chapter}:${firstVerse}-${lastVerse}`;
+
+  // Combine text
+  const combinedText = verses.length === 1
+    ? verses[0].text
+    : verses.map(v => `${v.verseStart}. ${v.text}`).join(' ');
+
+  return {
+    ref: rangeRef,
+    text: combinedText,
+    pericope: startVerse.pericope,
+    book: startVerse.book,
+    chapter: startVerse.chapter,
+    verseStart: firstVerse,
+    verseEnd: lastVerse
+  };
+}
+
+/**
  * Get random verse(s) from all bible_verses (no theme filter)
  * @param {Object} options - { count: 1, excludeRefs: [] }
  * @returns {Promise<Array<{ref, text, pericope, book, chapter, verseStart, verseEnd}>>}
@@ -322,6 +396,76 @@ async function getRandomVerses(options = {}) {
   return verses;
 }
 
+/**
+ * Get random verse RANGE (no theme filter, multi-ayat dari pasal yang sama)
+ * @param {Object} options - { minVerses: 2, maxVerses: 4, excludeRefs: [] }
+ * @returns {Promise<{ref, text, pericope, book, chapter, verseStart, verseEnd}|null>}
+ */
+async function getRandomVerseRange(options = {}) {
+  const Model = getModel();
+  const { minVerses = 2, maxVerses = 4, excludeRefs = [] } = options;
+
+  // Build query
+  const query = {};
+
+  // Exclude already used refs
+  if (excludeRefs.length > 0) {
+    query.ref = { $nin: excludeRefs };
+  }
+
+  // Get total count
+  const totalCount = await Model.countDocuments(query);
+  if (totalCount === 0) {
+    console.log(`⚠️ No verses available in bible_verses`);
+    return null;
+  }
+
+  // Random pick 1 verse
+  const [startVerse] = await Model.aggregate([
+    { $match: query },
+    { $sample: { size: 1 } },
+    { $project: { _id: 0, ref: 1, book: 1, chapter: 1, verseStart: 1, pericope: 1 } }
+  ]);
+
+  if (!startVerse) return null;
+
+  // Random count between minVerses and maxVerses
+  const verseCount = Math.floor(Math.random() * (maxVerses - minVerses + 1)) + minVerses;
+
+  // Get consecutive verses from same chapter
+  const verses = await Model.find({
+    book: startVerse.book,
+    chapter: startVerse.chapter,
+    verseStart: { $gte: startVerse.verseStart, $lt: startVerse.verseStart + verseCount }
+  })
+    .sort({ verseStart: 1 })
+    .lean();
+
+  if (verses.length === 0) return null;
+
+  // Build range ref
+  const firstVerse = verses[0].verseStart;
+  const lastVerse = verses[verses.length - 1].verseStart;
+  const rangeRef = verses.length === 1
+    ? `${startVerse.book} ${startVerse.chapter}:${firstVerse}`
+    : `${startVerse.book} ${startVerse.chapter}:${firstVerse}-${lastVerse}`;
+
+  // Combine text
+  const combinedText = verses.length === 1
+    ? verses[0].text
+    : verses.map(v => `${v.verseStart}. ${v.text}`).join(' ');
+
+  return {
+    ref: rangeRef,
+    text: combinedText,
+    pericope: startVerse.pericope,
+    book: startVerse.book,
+    chapter: startVerse.chapter,
+    verseStart: firstVerse,
+    verseEnd: lastVerse
+  };
+}
+
 module.exports = {
   getModel,
   saveVerse,
@@ -337,5 +481,7 @@ module.exports = {
   getStats,
   getMissingChapters,
   getRandomVersesByTheme,
+  getRandomVerseRangeByTheme,
   getRandomVerses,
+  getRandomVerseRange,
 };
